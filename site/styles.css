@@ -1002,6 +1002,43 @@ button {
   margin: 0 auto;
 }
 
+.quote-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  max-width: 1300px;
+  margin: 0 auto 10px;
+  padding: 10px 13px;
+  background: #eaf6fc;
+  border: 1px solid #acd9ee;
+  border-left: 4px solid var(--speedway-blue);
+  border-radius: var(--radius);
+}
+
+.quote-context span,
+.quote-context strong {
+  display: block;
+}
+
+.quote-context span {
+  color: var(--mobile-drill-blue);
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.quote-context strong {
+  margin-top: 2px;
+  font-size: 0.82rem;
+}
+
+.quote-context small {
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+}
+
 .quote-form,
 .quote-summary {
   background: var(--white);
@@ -2452,6 +2489,82 @@ button:disabled {
   margin: 0;
 }
 
+.rig-spec-toolbar > div > .status-label {
+  display: inline-flex;
+  margin-bottom: 7px;
+}
+
+.rig-spec-toolbar > div > strong {
+  font-size: 1.02rem;
+}
+
+.rig-spec-toolbar .secondary-button {
+  flex: 0 0 auto;
+  text-decoration: none;
+}
+
+.rig-spec-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.rig-spec-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.rig-spec-details {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.2fr);
+  gap: 0;
+  margin: 0;
+  padding: 6px 13px 12px;
+}
+
+.rig-spec-details dt,
+.rig-spec-details dd {
+  margin: 0;
+  padding: 7px 3px;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.72rem;
+}
+
+.rig-spec-details dt {
+  color: var(--ink-faint);
+  font-weight: 800;
+}
+
+.rig-spec-bom-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+  padding: 13px 14px;
+  background: var(--warning-pale);
+  border: 1px solid #efd78e;
+  border-radius: var(--radius);
+}
+
+.rig-spec-bom-note strong,
+.rig-spec-bom-note p {
+  display: block;
+  margin: 6px 0 0;
+}
+
+.rig-spec-bom-note strong {
+  font-size: 0.76rem;
+}
+
+.rig-spec-bom-note p {
+  color: var(--ink-soft);
+  font-size: 0.69rem;
+}
+
+.rig-spec-bom-note .primary-button {
+  flex: 0 0 auto;
+}
+
 .operations-panel h3 {
   font-size: 0.84rem;
 }
@@ -3159,6 +3272,10 @@ button:disabled {
   .prospect-rules,
   .training-grid { grid-template-columns: 1fr; }
   .metric-grid { grid-template-columns: 1fr 1fr; }
+  .rig-spec-layout { grid-template-columns: 1fr; }
+  .rig-spec-toolbar,
+  .rig-spec-bom-note,
+  .quote-context { align-items: stretch; flex-direction: column; }
   .workbench-bar--tooling { grid-template-columns: 1fr auto; }
   .workbench-bar--tooling .record-count { display: none; }
   .customer-tooling-context header { display: block; }

@@ -48,6 +48,7 @@ const state = {
   workflowTraining: { scenarioId: "first-call", messages: [], matchedKcs: ["KC001"] },
   rigSalesEditor: null,
   calibrationCustomerId: "",
+  rigSpecModel: "B25",
   bom: { serial: "2025023", section: "", query: "", selectedPart: "" },
   toastTimer: null,
   searchTimer: null,
@@ -209,6 +210,42 @@ const workspaceEntries = [
   ["Calibration Training", "Calibration practice workspace", "calibrationTraining", "training calibration practice"],
   ["Workflow Training", "Customer-call practice", "workflowTraining", "training workflow rookie knowledge chapter"],
 ].map(([label, detail, action, aliases]) => ({ id: `workspace-${action}`, label, detail, category: "Workspace", action, aliases }));
+
+const rigModelSpecs = [
+  {
+    id: "b25",
+    model: "B25",
+    name: "B25 Hydraulic Drill Rig",
+    summary: "Compact, under-CDL hydraulic rig for geotechnical and environmental work.",
+    aliases: "mobile drill b25 hydraulic under cdl geotechnical environmental automatic hammer",
+    source: "Current Mobile Drill B25 product page",
+    sourceUrl: "https://mobiledrill.net/product-category/drill-rigs/new-drill-rigs/b25",
+    metrics: [
+      ["Pulldown", "6,000 lb"],
+      ["Retract", "10,800 lb"],
+      ["Feed stroke", "6.3 ft"],
+      ["Maximum speed", "670 rpm"],
+      ["Maximum torque", "3,417 ft-lb"],
+      ["Engine", "44 HP @ 3,000 rpm"],
+    ],
+    details: [
+      ["Engine", "Kubota V1505-TE3B Tier 4"],
+      ["Rotary head", "4-speed hydraulic"],
+      ["Main hoist", "3,000 lb"],
+      ["Safe-T / wireline hoist", "900 lb"],
+      ["Front winch", "8,000 lb"],
+      ["Automatic hammer", "ASTM D-1586"],
+      ["Mounting", "Truck, rubber track, or trailer"],
+      ["Pump setup", "Multiple pump options"],
+    ],
+    capacities: [
+      ["3-1/4 in HSA", "60 ft"],
+      ["6 in CFA", "85 ft"],
+      ["2-5/8 in rotary pipe", "200 ft"],
+      ["N wireline", "250 ft"],
+    ],
+  },
+];
 
 function normalize(value) {
   return String(value || "")
@@ -381,8 +418,29 @@ function newQuote() {
   const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
   return {
     number: `DEMO-${stamp}`, customerId: state.selectedCustomerId || "", customerPo: "", salesperson: "",
-    terms: "Net 30", shipVia: "Best way", notes: "", freight: 0, taxRate: 0, lines: [], savedAt: "",
+    workflow: "General", terms: "Net 30", shipVia: "Best way", notes: "", freight: 0, taxRate: 0, lines: [], savedAt: "",
   };
+}
+
+function startCalibrationQuote(customer) {
+  const quote = newQuote();
+  quote.workflow = "Calibration";
+  quote.number = `CAL-${quote.number}`;
+  quote.customerId = customer?.id || "";
+  quote.notes = `Calibration quote for ${customer?.name || "selected customer"}. Started from the Calibration workspace.`;
+  quote.lines = [{
+    part: "CAL-SERVICE",
+    description: "Automatic hammer calibration service",
+    quantity: 1,
+    unitPrice: 0,
+    discount: 0,
+    taxable: false,
+    source: "Calibration workspace",
+  }];
+  state.quote = quote;
+  safeSave("mdb-demo-quote", state.quote);
+  openWorkspace("quotes");
+  showToast(`Clean calibration quote started${customer ? ` for ${customer.name}` : ""}`);
 }
 
 function stockSeed(part) {
@@ -493,6 +551,11 @@ function buildSearchIndex() {
     id: `rig-${rig.serial}`, label: `${rig.model} / ${rig.serial}`, detail: `${rig.sections.length} BOM sections`,
     category: "Rig", action: "bom", serial: rig.serial, aliases: `${rig.model} ${rig.serial} rig bom`,
   }));
+  const rigSpecEntries = rigModelSpecs.map((rig) => ({
+    id: `rig-spec-${rig.id}`, label: rig.model, detail: `${rig.name} / model specifications`,
+    category: "Rig Model", action: "rigSpecs", model: rig.model,
+    aliases: `${rig.aliases} rig specs specifications capabilities capacity`,
+  }));
   const rigPartEntries = state.data.rig.items.map((item) => ({
     id: `rig-part-${item.id}`, label: `${item.part} - ${item.cleanDescription || item.description}`,
     detail: `${item.models} / ${item.sections}`, category: "Rig Part", action: "bom",
@@ -505,7 +568,7 @@ function buildSearchIndex() {
     query: item.part || item.description, toolId: item.id,
     aliases: `${item.rawPart || ""} ${item.alternatePart || ""} ${item.aliases || ""} ${item.size || ""} ${item.connection || ""}`,
   }));
-  state.searchIndex = [...workspaceEntries, ...customerEntries, ...rigEntries, ...rigPartEntries, ...toolEntries];
+  state.searchIndex = [...workspaceEntries, ...customerEntries, ...rigSpecEntries, ...rigEntries, ...rigPartEntries, ...toolEntries];
 }
 
 function findMatches(query, entries = state.searchIndex, limit = 10) {
@@ -540,6 +603,7 @@ function dispatchSearchResult(result) {
   hideSearchResults(elements.globalSearchResults, elements.globalSearchInput);
   if (result.action === "customer") openCustomerWorkspace(result.customerId);
   else if (result.action === "bom") openWorkspace("bom", { serial: result.serial, part: result.part });
+  else if (result.action === "rigSpecs") openWorkspace("rigSpecs", { model: result.model });
   else if (result.action === "tooling") openWorkspace("tooling", { query: result.query, toolId: result.toolId });
   else openWorkspace(result.action);
 }
@@ -649,7 +713,7 @@ function openWorkspace(type, options = {}) {
   const customer = customers.find((item) => item.id === state.selectedCustomerId);
   elements.overlayEyebrow.textContent = type === "customerTooling" ? customer?.name || "Customer" : "MDB";
   const titles = {
-    tooling: "Tooling", customerTooling: "Customer Tooling", quotes: "Quote Builder", inventory: "Inventory", bom: "Rig / BOM View",
+    tooling: "Tooling", customerTooling: "Customer Tooling", quotes: "Quote Builder", inventory: "Inventory", bom: "Rig / BOM View", rigSpecs: "Rig Specifications",
     calibration: "Calibration", rigSales: "Rig Sales", prospects: "New Prospect Search", callList: "Daily Call List",
     calibrationTraining: "Calibration Training", workflowTraining: "Workflow Training",
   };
@@ -666,6 +730,7 @@ function openWorkspace(type, options = {}) {
   if (type === "quotes") renderQuoteWorkspace();
   if (type === "inventory") renderInventoryWorkspace(options.query || "");
   if (type === "bom") renderBomWorkspace(options);
+  if (type === "rigSpecs") renderRigSpecsWorkspace(options);
   if (type === "calibration") renderCalibrationWorkspace();
   if (type === "rigSales") renderRigSalesWorkspace();
   if (type === "prospects") renderProspectWorkspace();
@@ -987,7 +1052,9 @@ function quoteTotals() {
 function renderQuoteWorkspace() {
   if (!state.quote) state.quote = newQuote();
   const totals = quoteTotals();
-  elements.overlayBody.innerHTML = `<div class="quote-layout">
+  const workflow = state.quote.workflow || "General";
+  const customer = customers.find((item) => item.id === state.quote.customerId);
+  elements.overlayBody.innerHTML = `<div class="quote-context"><div><span>${escapeHTML(workflow)} quote</span><strong>${escapeHTML(customer?.name || "No customer selected")}</strong></div><small>This is a clean, browser-local working draft.</small></div><div class="quote-layout">
     <section class="quote-form">
       <div class="quote-fields">
         <label class="field"><span>Customer</span><select data-quote-field="customerId">${customerOptions(state.quote.customerId)}</select></label>
@@ -1015,6 +1082,21 @@ function renderQuoteWorkspace() {
       <p class="quote-state">${state.quote.savedAt ? `Saved in this browser ${escapeHTML(state.quote.savedAt)}` : "Not saved yet"}</p>
       <p class="quote-state">One working draft only · not shared · not sent to GP</p>
     </aside></div>`;
+}
+
+function renderRigSpecsWorkspace(options = {}) {
+  if (options.model && rigModelSpecs.some((rig) => rig.model === options.model)) state.rigSpecModel = options.model;
+  const rig = rigModelSpecs.find((item) => item.model === state.rigSpecModel) || rigModelSpecs[0];
+  state.rigSpecModel = rig.model;
+  elements.overlayBody.innerHTML = `<div class="workbench operations-workbench rig-spec-workbench">
+    <div class="operations-toolbar rig-spec-toolbar"><div><span class="status-label status-label--good">Model specs loaded</span><strong>${escapeHTML(rig.name)}</strong><span>${escapeHTML(rig.summary)}</span></div><a class="secondary-button" href="${escapeHTML(rig.sourceUrl)}" target="_blank" rel="noopener noreferrer">Official product page</a></div>
+    <div class="metric-grid rig-spec-metrics">${rig.metrics.map(([label, value]) => `<div><span>${escapeHTML(label)}</span><strong>${escapeHTML(value)}</strong></div>`).join("")}</div>
+    <div class="rig-spec-layout">
+      <section class="operations-panel rig-spec-panel"><header><div><h3>Model Specifications</h3><p>${escapeHTML(rig.source)}</p></div></header><dl class="rig-spec-details">${rig.details.map(([label, value]) => `<dt>${escapeHTML(label)}</dt><dd>${escapeHTML(value)}</dd>`).join("")}</dl></section>
+      <section class="operations-panel rig-spec-panel"><header><div><h3>Estimated Drilling Capacities</h3><p>Published guidance; conditions and configuration affect actual capacity.</p></div></header><table class="data-table"><thead><tr><th>Method</th><th>Estimated capacity</th></tr></thead><tbody>${rig.capacities.map(([method, value]) => `<tr><td>${escapeHTML(method)}</td><td><strong>${escapeHTML(value)}</strong></td></tr>`).join("")}</tbody></table></section>
+    </div>
+    <div class="rig-spec-bom-note"><div><span class="status-label status-label--warn">No serial BOM loaded</span><strong>${escapeHTML(rig.model)} specifications are available, but this demo does not contain a complete ${escapeHTML(rig.model)} serial BOM.</strong><p>Rig / BOM remains limited to the loaded B57 and B37X serial builds. MDB will not substitute parts from another rig.</p></div><button type="button" class="primary-button" data-rig-opportunity-model="${escapeHTML(rig.model)}">Start Rig Opportunity</button></div>
+  </div>`;
 }
 
 function renderQuoteLines() {
@@ -1455,9 +1537,11 @@ elements.overlayBody.addEventListener("keydown", (event) => {
 });
 
 elements.overlayBody.addEventListener("click", (event) => {
-  if (event.target.closest("[data-schedule-calibration-workspace]")) { const customer = customers.find((item) => item.id === state.calibrationCustomerId); state.quote.customerId = customer?.id || ""; addQuoteLine("CAL-SERVICE", "Automatic hammer calibration service", 0, "Calibration workspace"); openWorkspace("quotes"); return; }
+  if (event.target.closest("[data-schedule-calibration-workspace]")) { const customer = customers.find((item) => item.id === state.calibrationCustomerId); startCalibrationQuote(customer); return; }
   if (event.target.closest("[data-demo-certificate]")) { showToast("Calibration certificate opened in demo mode"); return; }
   if (event.target.closest("[data-rig-new]")) { state.rigSalesEditor = { id: "", company: "", territory: "Unassigned", rig: "TBD", stage: "New", value: 0, next: "" }; renderRigSalesWorkspace(); $("#rigSalesOpportunityForm input[name='company']")?.focus(); return; }
+  const rigOpportunityModel = event.target.closest("[data-rig-opportunity-model]");
+  if (rigOpportunityModel) { state.rigSalesEditor = { id: "", company: "", territory: "Unassigned", rig: rigOpportunityModel.dataset.rigOpportunityModel, stage: "New", value: 0, next: "Complete needs analysis" }; openWorkspace("rigSales"); $("#rigSalesOpportunityForm input[name='company']")?.focus(); return; }
   const rigEdit = event.target.closest("[data-rig-edit]");
   if (rigEdit) { const opportunity = rigSalesOpportunities.find((item) => item.id === rigEdit.dataset.rigEdit); state.rigSalesEditor = opportunity ? { ...opportunity } : null; renderRigSalesWorkspace(); return; }
   if (event.target.closest("[data-rig-editor-cancel]")) { state.rigSalesEditor = null; renderRigSalesWorkspace(); return; }
@@ -1545,9 +1629,9 @@ document.addEventListener("click", (event) => {
   if (customerButton) selectCustomer(customerButton.dataset.customerId);
   if (event.target.closest("[data-customer-tooling]")) openWorkspace("customerTooling");
   if (event.target.closest("[data-schedule-calibration]")) {
-    addQuoteLine("CAL-SERVICE", "Automatic hammer calibration service", 0, "Calibration workspace");
+    const customer = customers.find((item) => item.id === state.selectedCustomerId);
     elements.calibrationMenu.hidden = true;
-    openWorkspace("quotes");
+    startCalibrationQuote(customer);
   }
   if (!event.target.closest(".home-search-wrap")) hideSearchResults(elements.globalSearchResults, elements.globalSearchInput);
   if (!event.target.closest(".customer-search-wrap")) hideSearchResults(elements.customerSearchResults, elements.customerSearchInput);
