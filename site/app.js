@@ -46,6 +46,7 @@ const state = {
   prospectResults: [],
   prospectParams: { territory: "Midwest", market: "All", radius: "100", keywords: "drilling geotechnical", visual: true },
   workflowTraining: { scenarioId: "first-call", messages: [], matchedKcs: ["KC001"] },
+  rigSalesEditor: null,
   calibrationCustomerId: "",
   bom: { serial: "2025023", section: "", query: "", selectedPart: "" },
   toastTimer: null,
@@ -198,7 +199,7 @@ const workflowTrainingScenarios = {
 const workspaceEntries = [
   ["Customer Profile", "Customer workspace", "customer", "customer client account company"],
   ["Tooling", "Full catalog and CTS search", "tooling", "tooling drive cap split spoon hsa auger hex cor moyno drill rod"],
-  ["Quote Builder", "Editable demo quote", "quotes", "quote pricing estimate builder"],
+  ["Quote Builder", "One browser-saved demo draft", "quotes", "quote pricing estimate builder"],
   ["Inventory", "Editable GP-field demo", "inventory", "inventory stock available on hand allocated bin price"],
   ["Rig / BOM View", "B57 and B37X serial BOMs", "bom", "rig bom serial assembly parts bill material b57 b37x"],
   ["Calibration", "Calibration history, schedule, and quote", "calibration", "calibration hammer schedule certificate"],
@@ -293,6 +294,25 @@ function safeLoad(key, fallback) {
 
 function safeSave(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* demo still works without persistence */ }
+}
+
+function loadRigSalesOpportunities() {
+  const saved = safeLoad("mdb-demo-rig-sales-opportunities", null);
+  if (!Array.isArray(saved) || !saved.length) return;
+  const valid = saved.filter((item) => item && item.id && item.company).map((item) => ({
+    id: String(item.id),
+    company: String(item.company),
+    territory: String(item.territory || "Unassigned"),
+    rig: String(item.rig || "TBD"),
+    stage: String(item.stage || "New"),
+    value: Number(item.value) || 0,
+    next: String(item.next || "Complete needs analysis"),
+  }));
+  if (valid.length) rigSalesOpportunities.splice(0, rigSalesOpportunities.length, ...valid);
+}
+
+function saveRigSalesOpportunities() {
+  safeSave("mdb-demo-rig-sales-opportunities", rigSalesOpportunities);
 }
 
 let rigQuoteDbPromise;
@@ -411,6 +431,7 @@ async function loadData() {
   state.stock = safeLoad("mdb-demo-stock", {});
   state.touches = safeLoad("mdb-demo-touches", {});
   state.quote = safeLoad("mdb-demo-quote", null) || newQuote();
+  loadRigSalesOpportunities();
   state.rigQuoteFiles = await loadRigQuoteFiles();
   state.ready = true;
   buildToolItems();
@@ -989,9 +1010,10 @@ function renderQuoteWorkspace() {
       <label class="summary-input"><span>Tax rate %</span><input type="number" min="0" step="0.01" data-quote-field="taxRate" value="${state.quote.taxRate}"></label>
       <div class="summary-row"><span>Tax</span><strong id="quoteTax">${formatCurrency(totals.tax)}</strong></div>
       <div class="summary-row total"><span>Total</span><strong id="quoteTotal">${formatCurrency(totals.total)}</strong></div>
-      <button class="primary-button" type="button" data-quote-save>Save Dummy Quote</button>
+      <button class="primary-button" type="button" data-quote-save>Save Browser Draft</button>
       <button class="secondary-button quote-secondary" type="button" data-quote-new>Start New Quote</button>
-      <p class="quote-state">${state.quote.savedAt ? `Saved locally ${escapeHTML(state.quote.savedAt)}` : "Not sent to GP"}</p>
+      <p class="quote-state">${state.quote.savedAt ? `Saved in this browser ${escapeHTML(state.quote.savedAt)}` : "Not saved yet"}</p>
+      <p class="quote-state">One working draft only · not shared · not sent to GP</p>
     </aside></div>`;
 }
 
@@ -1120,10 +1142,30 @@ function renderRigSalesWorkspace() {
   const pipeline = rigSalesOpportunities.reduce((sum, item) => sum + item.value, 0);
   elements.overlayBody.innerHTML = `<div class="workbench operations-workbench">
     <div class="operations-toolbar"><div><strong>Active rig opportunities</strong><span>Requirements, demonstrations, attached quote files, and next actions</span></div><button type="button" class="primary-button" data-rig-new>New Opportunity</button></div>
+    ${renderRigSalesEditor()}
     <div class="metric-grid"><div><span>Open opportunities</span><strong>${rigSalesOpportunities.length}</strong></div><div><span>Pipeline value</span><strong>${formatCurrency(pipeline)}</strong></div><div><span>Demos scheduled</span><strong>${rigSalesOpportunities.filter((item) => item.stage === "Demo Scheduled").length}</strong></div><div><span>Quotes active</span><strong>${rigSalesOpportunities.filter((item) => item.stage === "Quote").length}</strong></div></div>
     <section class="operations-panel"><header><div><h3>Rig Sales Pipeline</h3><p>Quote PDFs are attached by the rep and stay view-only inside this workspace.</p></div></header>
-      <div class="table-scroll"><table class="data-table"><thead><tr><th>Company</th><th>Territory</th><th>Rig</th><th>Stage</th><th>Estimated value</th><th>Next action</th><th>Quote file</th></tr></thead><tbody>${rigSalesOpportunities.map((item, index) => `<tr><td><strong>${escapeHTML(item.company)}</strong></td><td>${escapeHTML(item.territory)}</td><td>${escapeHTML(item.rig)}</td><td><select class="cell-select" data-rig-stage="${index}">${["New", "Needs Analysis", "Demo Scheduled", "Quote", "Follow-Up", "Won", "Lost"].map((stage) => `<option ${stage === item.stage ? "selected" : ""}>${stage}</option>`).join("")}</select></td><td>${formatCurrency(item.value)}</td><td>${escapeHTML(item.next)}</td><td>${renderRigQuoteFileCell(item)}</td></tr>`).join("")}</tbody></table></div>
+      <div class="table-scroll"><table class="data-table"><thead><tr><th>Company</th><th>Territory</th><th>Rig</th><th>Stage</th><th>Estimated value</th><th>Next action</th><th>Quote file</th></tr></thead><tbody>${rigSalesOpportunities.map((item, index) => `<tr><td><div class="opportunity-company"><strong>${escapeHTML(item.company)}</strong><button type="button" class="link-button" data-rig-edit="${escapeHTML(item.id)}">Edit</button></div></td><td>${escapeHTML(item.territory)}</td><td>${escapeHTML(item.rig)}</td><td><select class="cell-select" data-rig-stage="${index}">${["New", "Needs Analysis", "Demo Scheduled", "Quote", "Follow-Up", "Won", "Lost"].map((stage) => `<option ${stage === item.stage ? "selected" : ""}>${stage}</option>`).join("")}</select></td><td>${formatCurrency(item.value)}</td><td>${escapeHTML(item.next)}</td><td>${renderRigQuoteFileCell(item)}</td></tr>`).join("")}</tbody></table></div>
     </section></div>`;
+}
+
+function renderRigSalesEditor() {
+  const item = state.rigSalesEditor;
+  if (!item) return "";
+  const stages = ["New", "Needs Analysis", "Demo Scheduled", "Quote", "Follow-Up", "Won", "Lost"];
+  const territories = ["Unassigned", "Northeast", "Southeast", "Midwest", "Southwest", "West"];
+  if (item.territory && !territories.includes(item.territory)) territories.unshift(item.territory);
+  return `<section class="rig-opportunity-editor"><header><div><strong>${item.id ? "Edit Opportunity" : "New Opportunity"}</strong><span>Saved to this browser as its own pipeline record</span></div><button type="button" class="close-button" data-rig-editor-cancel aria-label="Cancel opportunity editor">×</button></header>
+    <form id="rigSalesOpportunityForm">
+      <label class="field field--wide"><span>Company</span><input name="company" required value="${escapeHTML(item.company)}" placeholder="Company name"></label>
+      <label class="field"><span>Territory</span><select name="territory">${territories.map((territory) => `<option ${territory === item.territory ? "selected" : ""}>${territory}</option>`).join("")}</select></label>
+      <label class="field"><span>Rig</span><input name="rig" value="${escapeHTML(item.rig)}" placeholder="B57, B37X, TBD..."></label>
+      <label class="field"><span>Stage</span><select name="stage">${stages.map((stage) => `<option ${stage === item.stage ? "selected" : ""}>${stage}</option>`).join("")}</select></label>
+      <label class="field"><span>Estimated value</span><input name="value" type="number" min="0" step="0.01" value="${Number(item.value) || 0}"></label>
+      <label class="field field--wide"><span>Next action</span><input name="next" value="${escapeHTML(item.next)}" placeholder="Next required action"></label>
+      <div class="rig-opportunity-editor__actions"><button type="submit" class="primary-button">Save Opportunity</button><button type="button" class="secondary-button" data-rig-editor-cancel>Cancel</button></div>
+    </form>
+  </section>`;
 }
 
 function renderRigQuoteFileCell(opportunity) {
@@ -1366,7 +1408,7 @@ elements.overlayBody.addEventListener("change", async (event) => {
   const target = event.target;
   if (target.id === "bomRigSelect") { state.bom.serial = target.value; state.bom.section = ""; state.bom.selectedPart = ""; renderBomWorkspace(); }
   if (target.id === "calibrationCustomerSelect") { state.calibrationCustomerId = target.value; renderCalibrationWorkspace(); }
-  if (target.matches("[data-rig-stage]")) { rigSalesOpportunities[Number(target.dataset.rigStage)].stage = target.value; renderRigSalesWorkspace(); }
+  if (target.matches("[data-rig-stage]")) { rigSalesOpportunities[Number(target.dataset.rigStage)].stage = target.value; saveRigSalesOpportunities(); renderRigSalesWorkspace(); }
   if (target.matches("[data-rig-quote-upload]")) {
     const file = target.files?.[0];
     if (!file) return;
@@ -1379,6 +1421,27 @@ elements.overlayBody.addEventListener("change", async (event) => {
 });
 
 elements.overlayBody.addEventListener("submit", (event) => {
+  if (event.target.id === "rigSalesOpportunityForm") {
+    event.preventDefault();
+    const values = new FormData(event.target);
+    const opportunity = {
+      id: state.rigSalesEditor.id || `opportunity-${Date.now()}`,
+      company: String(values.get("company") || "").trim(),
+      territory: String(values.get("territory") || "Unassigned"),
+      rig: String(values.get("rig") || "TBD").trim() || "TBD",
+      stage: String(values.get("stage") || "New"),
+      value: Number(values.get("value")) || 0,
+      next: String(values.get("next") || "").trim() || "Complete needs analysis",
+    };
+    const existingIndex = rigSalesOpportunities.findIndex((item) => item.id === opportunity.id);
+    if (existingIndex >= 0) rigSalesOpportunities[existingIndex] = opportunity;
+    else rigSalesOpportunities.unshift(opportunity);
+    saveRigSalesOpportunities();
+    state.rigSalesEditor = null;
+    renderRigSalesWorkspace();
+    showToast(`${opportunity.company} saved as its own opportunity`);
+    return;
+  }
   if (event.target.id !== "workflowChatForm") return;
   event.preventDefault();
   runWorkflowTrainingTurn($("#workflowChatInput")?.value);
@@ -1394,7 +1457,10 @@ elements.overlayBody.addEventListener("keydown", (event) => {
 elements.overlayBody.addEventListener("click", (event) => {
   if (event.target.closest("[data-schedule-calibration-workspace]")) { const customer = customers.find((item) => item.id === state.calibrationCustomerId); state.quote.customerId = customer?.id || ""; addQuoteLine("CAL-SERVICE", "Automatic hammer calibration service", 0, "Calibration workspace"); openWorkspace("quotes"); return; }
   if (event.target.closest("[data-demo-certificate]")) { showToast("Calibration certificate opened in demo mode"); return; }
-  if (event.target.closest("[data-rig-new]")) { rigSalesOpportunities.unshift({ id: `opportunity-${Date.now()}`, company: "New opportunity", territory: "Unassigned", rig: "TBD", stage: "New", value: 0, next: "Complete needs analysis" }); renderRigSalesWorkspace(); return; }
+  if (event.target.closest("[data-rig-new]")) { state.rigSalesEditor = { id: "", company: "", territory: "Unassigned", rig: "TBD", stage: "New", value: 0, next: "" }; renderRigSalesWorkspace(); $("#rigSalesOpportunityForm input[name='company']")?.focus(); return; }
+  const rigEdit = event.target.closest("[data-rig-edit]");
+  if (rigEdit) { const opportunity = rigSalesOpportunities.find((item) => item.id === rigEdit.dataset.rigEdit); state.rigSalesEditor = opportunity ? { ...opportunity } : null; renderRigSalesWorkspace(); return; }
+  if (event.target.closest("[data-rig-editor-cancel]")) { state.rigSalesEditor = null; renderRigSalesWorkspace(); return; }
   const rigQuoteView = event.target.closest("[data-rig-quote-view]");
   if (rigQuoteView) { viewRigQuoteFile(rigQuoteView.dataset.rigQuoteView); return; }
   if (event.target.closest("[data-run-prospect]")) {
@@ -1453,7 +1519,7 @@ elements.overlayBody.addEventListener("click", (event) => {
   if (event.target.closest("[data-quote-add-line]")) { addQuoteLine("", "", 0); renderQuoteWorkspace(); return; }
   const remove = event.target.closest("[data-line-remove]");
   if (remove) { state.quote.lines.splice(Number(remove.dataset.lineRemove), 1); safeSave("mdb-demo-quote", state.quote); renderQuoteWorkspace(); return; }
-  if (event.target.closest("[data-quote-save]")) { state.quote.savedAt = new Date().toLocaleString(); safeSave("mdb-demo-quote", state.quote); renderQuoteWorkspace(); showToast("Dummy quote saved locally"); return; }
+  if (event.target.closest("[data-quote-save]")) { state.quote.savedAt = new Date().toLocaleString(); safeSave("mdb-demo-quote", state.quote); renderQuoteWorkspace(); showToast("Quote draft saved in this browser"); return; }
   if (event.target.closest("[data-quote-new]")) { state.quote = newQuote(); safeSave("mdb-demo-quote", state.quote); renderQuoteWorkspace(); showToast("New dummy quote started"); }
 });
 
