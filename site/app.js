@@ -38,6 +38,7 @@ const state = {
   searchIndex: [],
   toolItems: [],
   quote: null,
+  rigQuoteFiles: {},
   stock: {},
   touches: {},
   tooling: { query: "", scope: "All", builder: "", filters: {}, selectedId: "", browseOpen: false },
@@ -136,10 +137,10 @@ Object.assign(atlas, {
 });
 
 const rigSalesOpportunities = [
-  { company: "Midwest Subsurface Group", territory: "Indiana", rig: "B57", stage: "Needs Analysis", value: 285000, next: "Confirm rotary and SPT package" },
-  { company: "Ohio Geotechnical Partners", territory: "Ohio", rig: "B37X", stage: "Demo Scheduled", value: 342000, next: "Field demonstration · Aug 21" },
-  { company: "Blue Ridge Drilling", territory: "Kentucky", rig: "B57", stage: "Quote", value: 297500, next: "Review trade and delivery" },
-  { company: "Heartland Environmental", territory: "Indiana", rig: "B53", stage: "Follow-Up", value: 248000, next: "Call decision team · Aug 18" },
+  { id: "midwest-subsurface-b57", company: "Midwest Subsurface Group", territory: "Indiana", rig: "B57", stage: "Needs Analysis", value: 285000, next: "Confirm rotary and SPT package" },
+  { id: "ohio-geotechnical-b37x", company: "Ohio Geotechnical Partners", territory: "Ohio", rig: "B37X", stage: "Demo Scheduled", value: 342000, next: "Field demonstration · Aug 21" },
+  { id: "blue-ridge-b57", company: "Blue Ridge Drilling", territory: "Kentucky", rig: "B57", stage: "Quote", value: 297500, next: "Review trade and delivery" },
+  { id: "heartland-b53", company: "Heartland Environmental", territory: "Indiana", rig: "B53", stage: "Follow-Up", value: 248000, next: "Call decision team · Aug 18" },
 ];
 
 const prospectCandidates = [
@@ -223,6 +224,13 @@ function formatCurrency(value) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value) || 0);
 }
 
+function formatFileSize(value) {
+  const bytes = Number(value) || 0;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function formatDate(value) {
   return new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" })
     .format(new Date(`${value}T00:00:00Z`));
@@ -287,6 +295,68 @@ function safeSave(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* demo still works without persistence */ }
 }
 
+let rigQuoteDbPromise;
+
+function openRigQuoteDb() {
+  if (!("indexedDB" in window)) return Promise.resolve(null);
+  if (rigQuoteDbPromise) return rigQuoteDbPromise;
+  rigQuoteDbPromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open("mdb-demo-files", 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains("rig-sales-quotes")) {
+        request.result.createObjectStore("rig-sales-quotes", { keyPath: "opportunityId" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  return rigQuoteDbPromise;
+}
+
+async function loadRigQuoteFiles() {
+  try {
+    const db = await openRigQuoteDb();
+    if (!db) return {};
+    const records = await new Promise((resolve, reject) => {
+      const request = db.transaction("rig-sales-quotes", "readonly").objectStore("rig-sales-quotes").getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    return Object.fromEntries(records.map((record) => [record.opportunityId, record]));
+  } catch {
+    return {};
+  }
+}
+
+async function storeRigQuoteFile(opportunityId, file) {
+  const record = {
+    opportunityId,
+    name: file.name,
+    type: file.type || "application/pdf",
+    size: file.size,
+    uploadedAt: new Date().toISOString(),
+    blob: file,
+  };
+  state.rigQuoteFiles[opportunityId] = record;
+  try {
+    const db = await openRigQuoteDb();
+    if (!db) return;
+    await new Promise((resolve, reject) => {
+      const request = db.transaction("rig-sales-quotes", "readwrite").objectStore("rig-sales-quotes").put(record);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  } catch { /* the attachment still works for this browser session */ }
+}
+
+function viewRigQuoteFile(opportunityId) {
+  const record = state.rigQuoteFiles[opportunityId];
+  if (!record?.blob) { showToast("That quote file is no longer available on this browser"); return; }
+  const url = URL.createObjectURL(record.blob);
+  window.open(url, "_blank", "noopener,noreferrer");
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
 function newQuote() {
   const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
   return {
@@ -341,6 +411,7 @@ async function loadData() {
   state.stock = safeLoad("mdb-demo-stock", {});
   state.touches = safeLoad("mdb-demo-touches", {});
   state.quote = safeLoad("mdb-demo-quote", null) || newQuote();
+  state.rigQuoteFiles = await loadRigQuoteFiles();
   state.ready = true;
   buildToolItems();
   buildSearchIndex();
@@ -1048,11 +1119,18 @@ function renderCalibrationWorkspace() {
 function renderRigSalesWorkspace() {
   const pipeline = rigSalesOpportunities.reduce((sum, item) => sum + item.value, 0);
   elements.overlayBody.innerHTML = `<div class="workbench operations-workbench">
-    <div class="operations-toolbar"><div><strong>Active rig opportunities</strong><span>Requirements, demonstrations, quotes, and next actions</span></div><button type="button" class="primary-button" data-rig-new>New Opportunity</button></div>
+    <div class="operations-toolbar"><div><strong>Active rig opportunities</strong><span>Requirements, demonstrations, attached quote files, and next actions</span></div><button type="button" class="primary-button" data-rig-new>New Opportunity</button></div>
     <div class="metric-grid"><div><span>Open opportunities</span><strong>${rigSalesOpportunities.length}</strong></div><div><span>Pipeline value</span><strong>${formatCurrency(pipeline)}</strong></div><div><span>Demos scheduled</span><strong>${rigSalesOpportunities.filter((item) => item.stage === "Demo Scheduled").length}</strong></div><div><span>Quotes active</span><strong>${rigSalesOpportunities.filter((item) => item.stage === "Quote").length}</strong></div></div>
-    <section class="operations-panel"><header><div><h3>Rig Sales Pipeline</h3><p>Operational sales workspace</p></div></header>
-      <div class="table-scroll"><table class="data-table"><thead><tr><th>Company</th><th>Territory</th><th>Rig</th><th>Stage</th><th>Estimated value</th><th>Next action</th><th>Quote</th></tr></thead><tbody>${rigSalesOpportunities.map((item, index) => `<tr><td><strong>${escapeHTML(item.company)}</strong></td><td>${escapeHTML(item.territory)}</td><td>${escapeHTML(item.rig)}</td><td><select class="cell-select" data-rig-stage="${index}">${["New", "Needs Analysis", "Demo Scheduled", "Quote", "Follow-Up", "Won", "Lost"].map((stage) => `<option ${stage === item.stage ? "selected" : ""}>${stage}</option>`).join("")}</select></td><td>${formatCurrency(item.value)}</td><td>${escapeHTML(item.next)}</td><td><button type="button" class="table-button" data-rig-quote="${index}">Open Quote</button></td></tr>`).join("")}</tbody></table></div>
+    <section class="operations-panel"><header><div><h3>Rig Sales Pipeline</h3><p>Quote PDFs are attached by the rep and stay view-only inside this workspace.</p></div></header>
+      <div class="table-scroll"><table class="data-table"><thead><tr><th>Company</th><th>Territory</th><th>Rig</th><th>Stage</th><th>Estimated value</th><th>Next action</th><th>Quote file</th></tr></thead><tbody>${rigSalesOpportunities.map((item, index) => `<tr><td><strong>${escapeHTML(item.company)}</strong></td><td>${escapeHTML(item.territory)}</td><td>${escapeHTML(item.rig)}</td><td><select class="cell-select" data-rig-stage="${index}">${["New", "Needs Analysis", "Demo Scheduled", "Quote", "Follow-Up", "Won", "Lost"].map((stage) => `<option ${stage === item.stage ? "selected" : ""}>${stage}</option>`).join("")}</select></td><td>${formatCurrency(item.value)}</td><td>${escapeHTML(item.next)}</td><td>${renderRigQuoteFileCell(item)}</td></tr>`).join("")}</tbody></table></div>
     </section></div>`;
+}
+
+function renderRigQuoteFileCell(opportunity) {
+  const attachment = state.rigQuoteFiles[opportunity.id];
+  const upload = `<label class="quote-file-upload"><input type="file" accept="application/pdf,.pdf" data-rig-quote-upload="${escapeHTML(opportunity.id)}"><span>${attachment ? "Replace" : "Upload PDF"}</span></label>`;
+  if (!attachment) return `<div class="quote-file-cell">${upload}<small>View-only</small></div>`;
+  return `<div class="quote-file-cell quote-file-cell--attached"><div><button type="button" class="table-button" data-rig-quote-view="${escapeHTML(opportunity.id)}">View</button>${upload}</div><small title="${escapeHTML(attachment.name)}">${escapeHTML(attachment.name)} · ${formatFileSize(attachment.size)}</small></div>`;
 }
 
 function prospectStatus(candidate) {
@@ -1283,12 +1361,21 @@ function handleOverlayInput(event) {
 }
 
 elements.overlayBody.addEventListener("input", handleOverlayInput);
-elements.overlayBody.addEventListener("change", (event) => {
+elements.overlayBody.addEventListener("change", async (event) => {
   handleOverlayInput(event);
   const target = event.target;
   if (target.id === "bomRigSelect") { state.bom.serial = target.value; state.bom.section = ""; state.bom.selectedPart = ""; renderBomWorkspace(); }
   if (target.id === "calibrationCustomerSelect") { state.calibrationCustomerId = target.value; renderCalibrationWorkspace(); }
   if (target.matches("[data-rig-stage]")) { rigSalesOpportunities[Number(target.dataset.rigStage)].stage = target.value; renderRigSalesWorkspace(); }
+  if (target.matches("[data-rig-quote-upload]")) {
+    const file = target.files?.[0];
+    if (!file) return;
+    if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") { showToast("Please attach the quote as a PDF"); target.value = ""; return; }
+    if (file.size > 20 * 1024 * 1024) { showToast("Quote PDFs must be 20 MB or smaller"); target.value = ""; return; }
+    await storeRigQuoteFile(target.dataset.rigQuoteUpload, file);
+    renderRigSalesWorkspace();
+    showToast("Quote PDF attached for view-only use");
+  }
 });
 
 elements.overlayBody.addEventListener("submit", (event) => {
@@ -1307,9 +1394,9 @@ elements.overlayBody.addEventListener("keydown", (event) => {
 elements.overlayBody.addEventListener("click", (event) => {
   if (event.target.closest("[data-schedule-calibration-workspace]")) { const customer = customers.find((item) => item.id === state.calibrationCustomerId); state.quote.customerId = customer?.id || ""; addQuoteLine("CAL-SERVICE", "Automatic hammer calibration service", 0, "Calibration workspace"); openWorkspace("quotes"); return; }
   if (event.target.closest("[data-demo-certificate]")) { showToast("Calibration certificate opened in demo mode"); return; }
-  if (event.target.closest("[data-rig-new]")) { rigSalesOpportunities.unshift({ company: "New opportunity", territory: "Unassigned", rig: "TBD", stage: "New", value: 0, next: "Complete needs analysis" }); renderRigSalesWorkspace(); return; }
-  const rigQuote = event.target.closest("[data-rig-quote]");
-  if (rigQuote) { const opportunity = rigSalesOpportunities[Number(rigQuote.dataset.rigQuote)]; state.quote.notes = `Rig sales opportunity: ${opportunity.company} · ${opportunity.rig}`; openWorkspace("quotes"); return; }
+  if (event.target.closest("[data-rig-new]")) { rigSalesOpportunities.unshift({ id: `opportunity-${Date.now()}`, company: "New opportunity", territory: "Unassigned", rig: "TBD", stage: "New", value: 0, next: "Complete needs analysis" }); renderRigSalesWorkspace(); return; }
+  const rigQuoteView = event.target.closest("[data-rig-quote-view]");
+  if (rigQuoteView) { viewRigQuoteFile(rigQuoteView.dataset.rigQuoteView); return; }
   if (event.target.closest("[data-run-prospect]")) {
     state.prospectParams = { territory: $("#prospectTerritory").value, market: $("#prospectMarket").value, radius: $("#prospectRadius").value, keywords: $("#prospectKeywords").value, visual: $("#prospectVisual").checked };
     const keywordTerms = normalize(state.prospectParams.keywords).split(" ").filter(Boolean);

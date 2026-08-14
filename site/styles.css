@@ -2462,6 +2462,64 @@ button:disabled {
   font-size: 0.66rem;
 }
 
+.quote-file-cell {
+  display: grid;
+  gap: 4px;
+  min-width: 126px;
+}
+
+.quote-file-cell > div {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.quote-file-cell small {
+  display: block;
+  max-width: 190px;
+  overflow: hidden;
+  color: var(--ink-faint);
+  font-size: 0.59rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quote-file-upload {
+  position: relative;
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  color: var(--ink);
+  background: var(--white);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 0.66rem;
+  font-weight: 750;
+}
+
+.quote-file-upload:hover,
+.quote-file-upload:focus-within {
+  color: var(--mobile-drill-blue);
+  border-color: var(--speedway-blue);
+}
+
+.quote-file-upload input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+}
+
+.quote-file-cell--attached .table-button {
+  color: var(--white);
+  background: var(--mobile-drill-blue);
+  border-color: var(--mobile-drill-blue);
+}
+
 .cell-select {
   min-height: 30px;
   padding: 4px 7px;
