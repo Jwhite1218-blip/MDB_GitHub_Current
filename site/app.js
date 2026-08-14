@@ -4,6 +4,7 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
 const elements = {
+  workspaceNav: $("#workspaceNav"),
   homeView: $("#homeView"),
   customerView: $("#customerView"),
   homeButton: $("#homeButton"),
@@ -38,7 +39,12 @@ const state = {
   toolItems: [],
   quote: null,
   stock: {},
-  tooling: { query: "", family: "All", builder: "", filters: {}, selectedId: "" },
+  touches: {},
+  tooling: { query: "", scope: "All", builder: "", filters: {}, selectedId: "", browseOpen: false },
+  customerTooling: { query: "", scope: "All", builder: "", filters: {}, selectedId: "", browseOpen: false },
+  prospectResults: [],
+  prospectParams: { territory: "Indiana", market: "All", radius: "100", keywords: "drilling geotechnical", visual: true },
+  calibrationCustomerId: "",
   bom: { serial: "2025023", section: "", query: "", selectedPart: "" },
   toastTimer: null,
   searchTimer: null,
@@ -62,6 +68,11 @@ const interactionTemplates = [
   ["Note", "2026-07-09", "On-site demo of new SPT system", "J. Tech"],
   ["Call", "2026-06-28", "Follow-up on maintenance schedule", "M. Sales"],
   ["Email", "2026-06-14", "Serial confirmation received", "S. Rep"],
+];
+
+const demoLastTouches = [
+  "2026-08-11", "2026-07-29", "2026-06-18", "2026-05-26", "2026-05-14", "2026-04-30",
+  "2026-04-12", "2026-03-20", "2026-02-26", "2026-01-09", "2025-11-18", "2025-09-24",
 ];
 
 const customerNames = [
@@ -92,6 +103,7 @@ function buildCustomer(name, index) {
     customerSince: String(2010 + (index % 13)),
     creditTerms: index % 5 ? "Net 30" : "Prepay",
     status: index % 11 ? "Active" : "Inactive",
+    lastTouch: demoLastTouches[index % demoLastTouches.length],
     rigs: index % 4 ? [{ model, serial, year: 2018 + (index % 7), status: "Active" }] : [],
     purchases: purchaseTemplates.map((row, rowIndex) => ({
       date: row[0], type: row[1], description: row[2],
@@ -122,12 +134,34 @@ Object.assign(atlas, {
   ],
 });
 
+const rigSalesOpportunities = [
+  { company: "Midwest Subsurface Group", territory: "Indiana", rig: "B57", stage: "Needs Analysis", value: 285000, next: "Confirm rotary and SPT package" },
+  { company: "Ohio Geotechnical Partners", territory: "Ohio", rig: "B37X", stage: "Demo Scheduled", value: 342000, next: "Field demonstration · Aug 21" },
+  { company: "Blue Ridge Drilling", territory: "Kentucky", rig: "B57", stage: "Quote", value: 297500, next: "Review trade and delivery" },
+  { company: "Heartland Environmental", territory: "Indiana", rig: "B53", stage: "Follow-Up", value: 248000, next: "Call decision team · Aug 18" },
+];
+
+const prospectCandidates = [
+  { company: "GeoDynamics Inc.", territory: "Indiana", market: "Geotechnical", distance: 24, tags: "drilling geotechnical spt soil boring", domain: "geodynamics.example.invalid", matchCustomerId: "geodynamics-inc", accountCheck: "Exact customer-name and domain match", equipment: "Truck-mounted drill rig observed", possibleModel: "Mobile Drill B57", confidence: "High", evidence: "Fleet page image with Mobile Drill decal", ownership: "Ownership unconfirmed" },
+  { company: "Vertex Geo Services", territory: "Indiana", market: "Environmental", distance: 63, tags: "drilling environmental geotechnical sampling", domain: "vertexgeo.example.invalid", likelyCustomerId: "vertex-geoscience", accountCheck: "Name, market, and territory overlap — review alias or branch", equipment: "Drill operation indicated", possibleModel: "Make/model unclear", confidence: "Medium", evidence: "Project gallery image", ownership: "Ownership unconfirmed" },
+  { company: "Midwest Subsurface Group", territory: "Indiana", market: "Geotechnical", distance: 88, tags: "drilling geotechnical spt subsurface", domain: "midwestsubsurface.example.invalid", accountCheck: "No customer, alias, domain, phone, address, or purchase-history match", equipment: "Two drill rigs observed", possibleModel: "Possible B57 and crawler rig", confidence: "Medium", evidence: "Public equipment gallery", ownership: "Ownership unconfirmed" },
+  { company: "Buckeye Soil & Core", territory: "Ohio", market: "Geotechnical", distance: 141, tags: "drilling geotechnical soil core", domain: "buckeyesoil.example.invalid", accountCheck: "No customer, alias, domain, phone, address, or purchase-history match", equipment: "Drilling equipment observed", possibleModel: "Brand unknown", confidence: "Low", evidence: "Homepage project image", ownership: "Ownership unconfirmed" },
+  { company: "River Valley Environmental", territory: "Kentucky", market: "Environmental", distance: 176, tags: "drilling environmental sampling", domain: "rivervalleyenv.example.invalid", accountCheck: "No customer, alias, domain, phone, address, or purchase-history match", equipment: "No equipment visible", possibleModel: "None identified", confidence: "Low", evidence: "No qualifying public image", ownership: "Not established" },
+  { company: "Great Lakes Test Borings", territory: "Michigan", market: "Geotechnical", distance: 232, tags: "drilling geotechnical test boring spt", domain: "greatlakestest.example.invalid", accountCheck: "No customer, alias, domain, phone, address, or purchase-history match", equipment: "Mobile Drill equipment observed", possibleModel: "Possible B37X", confidence: "Medium", evidence: "Services page image and visible mast decal", ownership: "Ownership unconfirmed" },
+];
+
 const workspaceEntries = [
   ["Customer Profile", "Customer workspace", "customer", "customer client account company"],
   ["Tooling", "Full catalog and CTS search", "tooling", "tooling drive cap split spoon hsa auger hex cor moyno drill rod"],
   ["Quote Builder", "Editable demo quote", "quotes", "quote pricing estimate builder"],
   ["Inventory", "Editable GP-field demo", "inventory", "inventory stock available on hand allocated bin price"],
   ["Rig / BOM View", "B57 and B37X serial BOMs", "bom", "rig bom serial assembly parts bill material b57 b37x"],
+  ["Calibration", "Calibration history, schedule, and quote", "calibration", "calibration hammer schedule certificate"],
+  ["Rig Sales", "Rig opportunities and follow-up", "rigSales", "rig sales opportunity demonstration pipeline"],
+  ["New Prospect Search", "Rule-controlled prospect discovery", "prospects", "prospect search internet company equipment"],
+  ["Daily Call List", "90-day customer touch queue", "callList", "dormant overdue follow up call"],
+  ["Calibration Training", "Calibration practice workspace", "calibrationTraining", "training calibration practice"],
+  ["Workflow Training", "Customer-call practice", "workflowTraining", "training workflow rookie knowledge chapter"],
 ].map(([label, detail, action, aliases]) => ({ id: `workspace-${action}`, label, detail, category: "Workspace", action, aliases }));
 
 function normalize(value) {
@@ -261,6 +295,7 @@ async function loadData() {
     getJson("data/rig-parts.json"), getJson("data/tooling.json"),
   ]);
   state.stock = safeLoad("mdb-demo-stock", {});
+  state.touches = safeLoad("mdb-demo-touches", {});
   state.quote = safeLoad("mdb-demo-quote", null) || newQuote();
   state.ready = true;
   buildToolItems();
@@ -307,7 +342,7 @@ function buildToolItems() {
   const moyno = supplements.moyno.map((row, index) => ({
     id: `moyno-${index}`, part: firstPartNumber(row.part), rawPart: row.part,
     description: `Moyno ${row.model} - ${row.description}`, family: "Moyno", subfamily: "Pump Part",
-    style: row.model, sourceType: "Current WS004", status: "Model and pump serial required",
+    style: row.model, sourceType: "Current WS004", status: "Pump model controlled",
     quoteable: row.part !== "N/A", raw: row,
   }));
   state.toolItems = [...drive, ...split, ...hex, ...moyno, ...base];
@@ -373,9 +408,14 @@ function dispatchSearchResult(result) {
   else openWorkspace(result.action);
 }
 
+function setActiveNav(action) {
+  $$('[data-open]', elements.workspaceNav).forEach((button) => button.classList.toggle("is-active", button.dataset.open === action));
+}
+
 function showHome() {
   closeWorkspace();
   state.activeView = "home";
+  setActiveNav("home");
   elements.homeView.hidden = false;
   elements.customerView.hidden = true;
   elements.calibrationMenu.hidden = true;
@@ -385,6 +425,7 @@ function showHome() {
 function openCustomerWorkspace(customerId = "") {
   closeWorkspace();
   state.activeView = "customer";
+  setActiveNav("customer");
   elements.homeView.hidden = true;
   elements.customerView.hidden = false;
   renderCustomerList(elements.directoryFilter.value);
@@ -443,7 +484,7 @@ function renderCustomerProfile(customer) {
           <div class="table-scroll"><table class="data-table"><thead><tr><th>Rig</th><th>Serial</th><th>Year</th><th>Status</th><th>BOM</th></tr></thead><tbody>${rigRows}</tbody></table></div>
           <div class="fleet-summary"><div class="fleet-stat"><span>Total Rigs</span><strong>${customer.rigs.length}</strong></div><div class="fleet-stat"><span>Active</span><strong>${customer.rigs.filter((rig) => rig.status === "Active").length}</strong></div><div class="fleet-stat"><span>Inactive</span><strong>${customer.rigs.filter((rig) => rig.status !== "Active").length}</strong></div><div class="fleet-stat"><span>Profile</span><strong>Demo</strong></div></div>
         </section>
-        <section class="info-card"><header class="card-heading"><h2>Tooling DNA <small>Based on history</small></h2><button class="small-button" type="button" data-workspace="tooling">View Tooling</button></header>
+        <section class="info-card"><header class="card-heading"><h2>Tooling DNA <small>Based on the last 10 tooling purchases</small></h2><button class="small-button" type="button" data-customer-tooling>Customer Tooling</button></header>
           <div class="card-body tooling-dna"><div class="dna-overview"><div class="dna-chart" aria-label="Tooling category chart"></div><ul class="dna-legend">${customer.tooling.categories.map(([name, value], index) => `<li><span class="legend-dot" style="--dot:${["#0067a6", "#45a9df", "#e1262f", "#7aa7c5", "#cbd9e2"][index]}"></span>${name} (${value}%)</li>`).join("")}</ul></div>
           <ol class="tooling-rank">${customer.tooling.mostUsed.map((item) => `<li>${escapeHTML(item)}</li>`).join("")}</ol></div></section>
         <section class="info-card"><header class="card-heading"><h2>Recent Interactions</h2><button class="small-button" type="button">View All</button></header><div class="card-body interactions-wrap"><ul class="interaction-list">${interactions}</ul></div></section>
@@ -466,19 +507,43 @@ function openWorkspace(type, options = {}) {
   if (!state.ready) { showToast("MDB data is still loading."); return; }
   state.activeWorkspace = type;
   elements.workspaceOverlay.hidden = false;
-  elements.overlayEyebrow.textContent = state.selectedCustomerId ? customers.find((item) => item.id === state.selectedCustomerId)?.name || "MDB" : "MDB";
-  const titles = { tooling: "Tooling", quotes: "Quote Builder", inventory: "Inventory", bom: "Rig / BOM View" };
+  elements.overlayBody.scrollTop = 0;
+  elements.overlayBody.scrollLeft = 0;
+  elements.workspaceOverlay.classList.toggle("workspace-overlay--customer-tooling", type === "customerTooling");
+  const customer = customers.find((item) => item.id === state.selectedCustomerId);
+  elements.overlayEyebrow.textContent = type === "customerTooling" ? customer?.name || "Customer" : "MDB";
+  const titles = {
+    tooling: "Tooling", customerTooling: "Customer Tooling", quotes: "Quote Builder", inventory: "Inventory", bom: "Rig / BOM View",
+    calibration: "Calibration", rigSales: "Rig Sales", prospects: "New Prospect Search", callList: "Daily Call List",
+    calibrationTraining: "Calibration Training", workflowTraining: "Workflow Training",
+  };
   elements.overlayTitle.textContent = titles[type] || "Workspace";
-  if (type === "tooling") renderToolingWorkspace(options);
+  setActiveNav(type === "customerTooling" ? "customer" : type);
+  if (type === "tooling") {
+    state.tooling = { query: options.query || "", scope: "All", builder: detectBuilder(options.query || ""), filters: {}, selectedId: options.toolId || "", browseOpen: false };
+    renderToolingWorkspace(options);
+  }
+  if (type === "customerTooling") {
+    state.customerTooling = { query: "", scope: "All", builder: "", filters: {}, selectedId: "", browseOpen: false };
+    renderCustomerToolingWorkspace(customer);
+  }
   if (type === "quotes") renderQuoteWorkspace();
   if (type === "inventory") renderInventoryWorkspace(options.query || "");
   if (type === "bom") renderBomWorkspace(options);
+  if (type === "calibration") renderCalibrationWorkspace();
+  if (type === "rigSales") renderRigSalesWorkspace();
+  if (type === "prospects") renderProspectWorkspace();
+  if (type === "callList") renderCallListWorkspace();
+  if (type === "calibrationTraining") renderCalibrationTrainingWorkspace();
+  if (type === "workflowTraining") renderWorkflowTrainingWorkspace();
 }
 
 function closeWorkspace() {
   state.activeWorkspace = null;
   elements.workspaceOverlay.hidden = true;
+  elements.workspaceOverlay.classList.remove("workspace-overlay--customer-tooling");
   elements.overlayBody.innerHTML = "";
+  setActiveNav(state.activeView === "customer" ? "customer" : "home");
 }
 
 function detectBuilder(query) {
@@ -495,28 +560,69 @@ function toolingFamilies() {
   return ["All", ...new Set(state.toolItems.map((item) => item.family).filter(Boolean))].sort((a, b) => a === "All" ? -1 : b === "All" ? 1 : a.localeCompare(b));
 }
 
-function renderToolingWorkspace(options = {}) {
-  if (Object.hasOwn(options, "query")) state.tooling.query = options.query || "";
-  if (options.toolId) state.tooling.selectedId = options.toolId;
-  const detected = Object.hasOwn(options, "query") ? detectBuilder(state.tooling.query) : "";
-  if (detected) { state.tooling.builder = detected; state.tooling.filters = {}; }
-  elements.overlayBody.innerHTML = `
-    <div class="workbench tooling-workbench">
+function activeToolingState() {
+  return state.activeWorkspace === "customerTooling" ? state.customerTooling : state.tooling;
+}
+
+function toolingBrowsePanel() {
+  const toolState = activeToolingState();
+  const guided = [["driveCap", "Drive Cap"], ["hsaAuger", "HSA Auger"], ["splitSpoon", "Split Spoon"], ["hexCor", "HEX-COR / STD"], ["moyno", "Moyno"]];
+  return `<section id="toolBrowsePanel" class="tool-browse-panel" ${toolState.browseOpen ? "" : "hidden"}>
+    <div><strong>Guided selectors</strong><span>Use compatibility-controlled dropdowns</span><div class="browse-buttons">${guided.map(([id, label]) => `<button type="button" data-tool-builder="${id}">${label}</button>`).join("")}</div></div>
+    <div><strong>Catalog families</strong><span>Browse the complete tooling index</span><div class="browse-buttons">${toolingFamilies().map((family) => `<button type="button" class="${toolState.scope === family ? "is-active" : ""}" data-tool-scope="${escapeHTML(family)}">${escapeHTML(family === "All" ? "All Tooling" : family)}</button>`).join("")}</div></div>
+  </section>`;
+}
+
+function toolingCoreHtml(customer = null) {
+  const toolState = activeToolingState();
+  const customerHistory = customer ? customer.purchases.filter((item) => item.type === "Tooling").slice(0, 10) : [];
+  return `<div class="workbench tooling-workbench ${customer ? "tooling-workbench--customer" : ""}">
+      ${customer ? `<section class="customer-tooling-context"><header><strong>Based on the last 10 tooling purchases</strong><span>Customer history is isolated from the main Tooling workspace</span></header><div>${customerHistory.map((purchase) => `<button type="button" data-customer-history-search="${escapeHTML(purchase.description)}"><strong>${escapeHTML(purchase.description)}</strong><span>${formatDate(purchase.date)} · Qty ${purchase.quantity}</span></button>`).join("") || "<span>No tooling purchases recorded.</span>"}</div></section>` : ""}
       <div class="workbench-bar workbench-bar--tooling">
-        <label class="inline-search"><span class="search-mark" aria-hidden="true"></span><input id="toolSearch" type="search" value="${escapeHTML(state.tooling.query)}" placeholder="Search all tooling and part numbers..."></label>
-        <select id="toolFamilyFilter" class="compact-select" aria-label="Tooling family">${toolingFamilies().map((family) => `<option ${family === state.tooling.family ? "selected" : ""}>${escapeHTML(family)}</option>`).join("")}</select>
-        <span class="record-count">${state.data.tooling.meta.itemCount.toLocaleString()} indexed records</span>
+        <label class="inline-search"><span class="search-mark" aria-hidden="true"></span><input id="toolSearch" type="search" value="${escapeHTML(toolState.query)}" placeholder="Search all tooling and part numbers..."></label>
+        <button type="button" id="browseToolingButton" class="secondary-button" aria-expanded="${toolState.browseOpen}">Browse Tooling</button>
+        <span class="record-count">${state.toolItems.length.toLocaleString()} searchable records</span>
       </div>
-      <nav class="builder-tabs" aria-label="Controlled tooling paths">
-        ${[["driveCap", "Drive Cap"], ["hsaAuger", "HSA Auger"], ["splitSpoon", "Split Spoon"], ["hexCor", "HEX-COR / STD"], ["moyno", "Moyno"]].map(([id, label]) => `<button type="button" class="${state.tooling.builder === id ? "is-active" : ""}" data-tool-builder="${id}">${label}</button>`).join("")}
-      </nav>
-      <div id="toolBuilderHost">${renderToolingBuilder()}</div>
-      <div class="tooling-layout">
-        <section class="tool-results-panel"><div id="toolResultSummary" class="panel-strip"></div><div id="toolResults" class="tool-results"></div></section>
-        <aside id="toolDetail" class="tool-detail"></aside>
+      ${toolingBrowsePanel()}
+      <div class="tool-mode-bar"><strong id="toolModeLabel">${toolState.builder ? "Guided selection" : toolState.scope === "All" ? "All Tooling" : `Browsing ${escapeHTML(toolState.scope)}`}</strong>${toolState.builder || toolState.scope !== "All" ? '<button type="button" class="small-button" data-tool-reset>Back to All Tooling</button>' : ""}</div>
+      <div id="toolBuilderHost" ${toolState.builder ? "" : "hidden"}>${renderToolingBuilder()}</div>
+      <div id="toolCatalogSurface" ${toolState.builder ? "hidden" : ""}>
+        <div class="tooling-layout">
+          <section class="tool-results-panel"><div id="toolResultSummary" class="panel-strip"></div><div id="toolResults" class="tool-results"></div></section>
+          <aside id="toolDetail" class="tool-detail"></aside>
+        </div>
       </div>
     </div>`;
-  renderToolingResults();
+}
+
+function renderToolingWorkspace() {
+  elements.overlayBody.innerHTML = `
+    ${toolingCoreHtml()}`;
+  if (!state.tooling.builder) renderToolingResults();
+}
+
+function renderCustomerToolingWorkspace(customer) {
+  if (!customer) { elements.overlayBody.innerHTML = '<div class="profile-empty"><strong>Select a customer first</strong></div>'; return; }
+  elements.overlayBody.innerHTML = toolingCoreHtml(customer);
+  if (!state.customerTooling.builder) renderToolingResults();
+}
+
+function renderActiveToolingWorkspace() {
+  if (state.activeWorkspace === "customerTooling") renderCustomerToolingWorkspace(customers.find((item) => item.id === state.selectedCustomerId));
+  else renderToolingWorkspace();
+}
+
+function updateToolingModeSurface() {
+  const toolState = activeToolingState();
+  const builderHost = $("#toolBuilderHost");
+  const catalogSurface = $("#toolCatalogSurface");
+  const modeBar = $(".tool-mode-bar");
+  if (!builderHost || !catalogSurface || !modeBar) return;
+  modeBar.innerHTML = `<strong id="toolModeLabel">${toolState.builder ? "Guided selection" : toolState.scope === "All" ? "All Tooling" : `Browsing ${escapeHTML(toolState.scope)}`}</strong>${toolState.builder || toolState.scope !== "All" ? '<button type="button" class="small-button" data-tool-reset>Back to All Tooling</button>' : ""}`;
+  builderHost.hidden = !toolState.builder;
+  catalogSurface.hidden = Boolean(toolState.builder);
+  if (toolState.builder) builderHost.innerHTML = renderToolingBuilder();
+  else renderToolingResults();
 }
 
 function optionHtml(values, current, placeholder = "Any") {
@@ -532,16 +638,18 @@ function uniqueValues(records, field, selections = {}) {
 }
 
 function builderField(label, field, records, placeholder = "Select...") {
-  const value = state.tooling.filters[field] || "";
-  return `<label class="field"><span>${label}</span><select data-builder-field="${field}">${optionHtml(uniqueValues(records, field, state.tooling.filters), value, placeholder)}</select></label>`;
+  const toolState = activeToolingState();
+  const value = toolState.filters[field] || "";
+  return `<label class="field"><span>${label}</span><select data-builder-field="${field}">${optionHtml(uniqueValues(records, field, toolState.filters), value, placeholder)}</select></label>`;
 }
 
 function filterRecords(records, ignored = []) {
-  return records.filter((record) => Object.entries(state.tooling.filters).every(([key, value]) => !value || ignored.includes(key) || String(record[key]) === String(value)));
+  return records.filter((record) => Object.entries(activeToolingState().filters).every(([key, value]) => !value || ignored.includes(key) || String(record[key]) === String(value)));
 }
 
 function renderToolingBuilder() {
-  const builder = state.tooling.builder;
+  const toolState = activeToolingState();
+  const builder = toolState.builder;
   if (!builder) return "";
   if (builder === "driveCap") {
     const records = state.data.tooling.supplements.driveCaps;
@@ -553,7 +661,7 @@ function renderToolingBuilder() {
   if (builder === "splitSpoon") {
     const records = state.data.tooling.supplements.splitSpoons;
     const matches = filterRecords(records, ["shoe"]);
-    const shoe = state.tooling.filters.shoe || "";
+    const shoe = toolState.filters.shoe || "";
     return `<section class="compatibility-builder"><header><strong>Split Spoon</strong><span>Diameter first; shoe style is required</span></header>
       <div class="builder-fields">${builderField("Diameter", "diameter", records)}${builderField("Style", "style", records)}${builderField("Thread", "tpi", records)}${builderField("Length", "length", records)}${builderField("Rod", "rod", records)}
       <label class="field"><span>Shoe</span><select data-builder-field="shoe">${optionHtml(["Sharp", "Blunt"], shoe, "Select...")}</select></label></div>
@@ -568,9 +676,9 @@ function renderToolingBuilder() {
   }
   if (builder === "moyno") {
     const records = state.data.tooling.supplements.moyno;
-    const matches = filterRecords(records, ["serial"]);
-    return `<section class="compatibility-builder"><header><strong>Moyno Pump Parts</strong><span>Pump model + pump serial required</span></header>
-      <div class="builder-fields">${builderField("Pump model", "model", records)}<label class="field"><span>Pump serial</span><input data-builder-field="serial" value="${escapeHTML(state.tooling.filters.serial || "")}" placeholder="Enter nameplate serial"></label></div>
+    const matches = filterRecords(records);
+    return `<section class="compatibility-builder"><header><strong>Moyno Pump Parts</strong><span>Pump model determines the component list</span></header>
+      <div class="builder-fields">${builderField("Pump model", "model", records)}</div>
       ${renderMoynoMatches(matches)}</section>`;
   }
   if (builder === "hsaAuger") {
@@ -620,15 +728,13 @@ function renderHexMatches(records) {
 }
 
 function renderMoynoMatches(records) {
-  const serial = state.tooling.filters.serial || "";
-  if (!state.tooling.filters.model) return '<div class="terminal-state"><strong>Select the pump model</strong><span>3L4, 3L6, and 3L8 parts stay in separate columns.</span></div>';
+  const toolState = activeToolingState();
+  if (!toolState.filters.model) return '<div class="terminal-state"><strong>Select the pump model</strong><span>3L4, 3L6, and 3L8 parts stay in separate columns.</span></div>';
   const rows = records.map((row) => {
     const part = firstPartNumber(row.part);
-    const stock = part ? getStock(part) : { unitPrice: 0 };
-    const disabled = !serial || !part || row.part === "N/A";
-    return `<tr><td>${escapeHTML(row.model)}</td><td>${escapeHTML(row.description)}</td><td><strong>${escapeHTML(row.part)}</strong></td><td><button type="button" class="table-button" data-add-part="${escapeHTML(part)}" data-description="${escapeHTML(`Moyno ${row.model} ${row.description} - pump serial ${serial}`)}" data-price="${stock.unitPrice}" data-moyno-model="${escapeHTML(row.model)}" data-moyno-component="${escapeHTML(row.description)}" data-moyno-quotable="${row.part !== "N/A" && Boolean(part)}" ${disabled ? "disabled" : ""}>Add</button></td></tr>`;
+    return `<tr><td>${escapeHTML(row.model)}</td><td>${escapeHTML(row.description)}</td><td><strong>${escapeHTML(row.part)}</strong></td><td>${addPartButton(part, `Moyno ${row.model} ${row.description}`, !part || row.part === "N/A")}</td></tr>`;
   });
-  return `<div class="terminal-state terminal-state--warn" data-moyno-serial-warning ${serial ? "hidden" : ""}><strong>Pump serial required</strong><span>Enter the nameplate serial before adding a line.</span></div>${compactResultTable(["Model", "Component", "Part", "Quote"], rows)}`;
+  return compactResultTable(["Model", "Component", "Part", "Quote"], rows);
 }
 
 function hsaAugerRecords() {
@@ -654,8 +760,9 @@ function renderHsaMatches(records) {
 }
 
 function renderToolingResults() {
-  const query = state.tooling.query;
-  let items = state.toolItems.filter((item) => state.tooling.family === "All" || item.family === state.tooling.family);
+  const toolState = activeToolingState();
+  const query = toolState.query;
+  let items = state.toolItems.filter((item) => toolState.scope === "All" || item.family === toolState.scope);
   if (query) {
     items = items.map((item) => ({ ...item, score: matchScore(query, `${item.part} ${item.rawPart} ${item.description} ${item.family} ${item.subfamily} ${item.aliases}`) }))
       .filter((item) => item.score >= 0.52).sort((a, b) => b.score - a.score);
@@ -665,12 +772,12 @@ function renderToolingResults() {
   const visible = items.slice(0, 120);
   $("#toolResultSummary").innerHTML = `<strong>${items.length.toLocaleString()} matches</strong><span>${items.length > visible.length ? `Showing first ${visible.length}` : "Full result set"}</span>`;
   $("#toolResults").innerHTML = visible.length ? visible.map((item) => `
-    <button type="button" class="tool-result ${item.id === state.tooling.selectedId ? "is-selected" : ""}" data-tool-id="${escapeHTML(item.id)}">
+    <button type="button" class="tool-result ${item.id === toolState.selectedId ? "is-selected" : ""}" data-tool-id="${escapeHTML(item.id)}">
       <span><strong>${escapeHTML(item.part || "No active PN")}</strong><small>${escapeHTML(item.description)}</small></span>
       <span><em>${escapeHTML(item.family || "Tooling")}</em><small class="status-label ${statusClass(item.status)}">${escapeHTML(item.status)}</small></span>
     </button>`).join("") : '<div class="search-empty">No tooling record matches this search.</div>';
-  const selected = state.toolItems.find((item) => item.id === state.tooling.selectedId) || visible[0];
-  if (selected) { state.tooling.selectedId = selected.id; renderToolDetail(selected); }
+  const selected = state.toolItems.find((item) => item.id === toolState.selectedId) || visible[0];
+  if (selected) { toolState.selectedId = selected.id; renderToolDetail(selected); }
   else $("#toolDetail").innerHTML = '<div class="profile-empty"><strong>Select a tooling result</strong></div>';
 }
 
@@ -870,15 +977,120 @@ function renderBomDetail(part) {
     <label class="field"><span>Demo unit price</span><input type="number" min="0" step="0.01" data-stock-part="${escapeHTML(part)}" data-stock-field="unitPrice" value="${stock.unitPrice}"></label>${addPartButton(part, description, false, "Add to Quote")}</div>`;
 }
 
+function addDays(dateValue, days) {
+  const date = new Date(`${dateValue}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function customerLastTouch(customer) {
+  return state.touches[customer.id] || customer.lastTouch;
+}
+
+function renderCalibrationWorkspace() {
+  const customerId = state.calibrationCustomerId || state.selectedCustomerId || atlas.id;
+  const customer = customers.find((item) => item.id === customerId) || atlas;
+  state.calibrationCustomerId = customer.id;
+  const latest = customer.calibrations[0];
+  const nextDue = addDays(latest.date, 365);
+  elements.overlayBody.innerHTML = `<div class="workbench operations-workbench">
+    <div class="operations-toolbar"><label class="field"><span>Customer</span><select id="calibrationCustomerSelect">${customerOptions(customer.id)}</select></label><button type="button" class="primary-button" data-schedule-calibration-workspace>Schedule Calibration</button></div>
+    <div class="metric-grid"><div><span>Last calibration</span><strong>${formatDate(latest.date)}</strong></div><div><span>Next recommended date</span><strong>${formatDate(nextDue)}</strong></div><div><span>Completed records</span><strong>${customer.calibrations.length}</strong></div><div><span>Confirmed rigs</span><strong>${customer.rigs.length}</strong></div></div>
+    <section class="operations-panel"><header><div><h3>Calibration History</h3><p>${escapeHTML(customer.name)}</p></div><span class="status-label status-label--good">Current records</span></header>
+      <table class="data-table"><thead><tr><th>Date</th><th>Service</th><th>Result</th><th>Certificate</th></tr></thead><tbody>${customer.calibrations.map((item, index) => `<tr><td>${formatDate(item.date)}</td><td>${escapeHTML(item.service)}</td><td><span class="status-label status-label--good">${escapeHTML(item.result)}</span></td><td><button type="button" class="table-button" data-demo-certificate="${index}">View</button></td></tr>`).join("")}</tbody></table>
+    </section></div>`;
+}
+
+function renderRigSalesWorkspace() {
+  const pipeline = rigSalesOpportunities.reduce((sum, item) => sum + item.value, 0);
+  elements.overlayBody.innerHTML = `<div class="workbench operations-workbench">
+    <div class="operations-toolbar"><div><strong>Active rig opportunities</strong><span>Requirements, demonstrations, quotes, and next actions</span></div><button type="button" class="primary-button" data-rig-new>New Opportunity</button></div>
+    <div class="metric-grid"><div><span>Open opportunities</span><strong>${rigSalesOpportunities.length}</strong></div><div><span>Pipeline value</span><strong>${formatCurrency(pipeline)}</strong></div><div><span>Demos scheduled</span><strong>${rigSalesOpportunities.filter((item) => item.stage === "Demo Scheduled").length}</strong></div><div><span>Quotes active</span><strong>${rigSalesOpportunities.filter((item) => item.stage === "Quote").length}</strong></div></div>
+    <section class="operations-panel"><header><div><h3>Rig Sales Pipeline</h3><p>Operational sales workspace</p></div></header>
+      <div class="table-scroll"><table class="data-table"><thead><tr><th>Company</th><th>Territory</th><th>Rig</th><th>Stage</th><th>Estimated value</th><th>Next action</th><th>Quote</th></tr></thead><tbody>${rigSalesOpportunities.map((item, index) => `<tr><td><strong>${escapeHTML(item.company)}</strong></td><td>${escapeHTML(item.territory)}</td><td>${escapeHTML(item.rig)}</td><td><select class="cell-select" data-rig-stage="${index}">${["New", "Needs Analysis", "Demo Scheduled", "Quote", "Follow-Up", "Won", "Lost"].map((stage) => `<option ${stage === item.stage ? "selected" : ""}>${stage}</option>`).join("")}</select></td><td>${formatCurrency(item.value)}</td><td>${escapeHTML(item.next)}</td><td><button type="button" class="table-button" data-rig-quote="${index}">Open Quote</button></td></tr>`).join("")}</tbody></table></div>
+    </section></div>`;
+}
+
+function prospectStatus(candidate) {
+  if (candidate.matchCustomerId) return ["Existing Customer", "status-label--good"];
+  if (candidate.likelyCustomerId) return ["Likely Duplicate", "status-label--warn"];
+  return ["New Prospect", ""];
+}
+
+function renderProspectResults() {
+  const host = $("#prospectResults");
+  if (!host) return;
+  if (!state.prospectResults.length) {
+    host.innerHTML = '<div class="prospect-empty"><strong>Set the search parameters and run the prospect search.</strong><span>Company discovery, customer comparison, and equipment evidence return together.</span></div>';
+    return;
+  }
+  host.innerHTML = `<div class="prospect-summary"><strong>${state.prospectResults.length} companies reviewed</strong><span>Company search + account comparison + public evidence review</span></div><div class="prospect-grid">${state.prospectResults.map((candidate) => {
+    const [label, statusClassName] = prospectStatus(candidate);
+    const customerId = candidate.matchCustomerId || candidate.likelyCustomerId || "";
+    return `<article class="prospect-card"><header><div><span class="status-label ${statusClassName}">${label}</span><h3>${escapeHTML(candidate.company)}</h3><p>${escapeHTML(candidate.territory)} · ${escapeHTML(candidate.market)} · ${escapeHTML(candidate.domain)}</p></div><div class="equipment-thumb" aria-hidden="true"><span></span></div></header>
+      <dl><dt>Account check</dt><dd>${escapeHTML(candidate.accountCheck)}</dd><dt>Distance</dt><dd>${candidate.distance} miles</dd><dt>Equipment evidence</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.equipment) : "Image review not requested"}</dd><dt>Possible equipment</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.possibleModel) : "Not reviewed"}</dd><dt>Confidence</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.confidence) : "—"}</dd><dt>Ownership</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.ownership) : "Not evaluated"}</dd><dt>Evidence source</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.evidence) : "—"}</dd></dl>
+      <footer>${customerId ? `<button type="button" class="secondary-button" data-prospect-customer="${escapeHTML(customerId)}">Open Customer</button>` : '<button type="button" class="primary-button" data-start-prospect>Start Prospect</button>'}<button type="button" class="secondary-button" data-review-evidence>Review Evidence</button></footer></article>`;
+  }).join("")}</div>`;
+}
+
+function renderProspectWorkspace() {
+  const params = state.prospectParams;
+  elements.overlayBody.innerHTML = `<div class="workbench prospect-workbench">
+    <section class="prospect-controls"><header><div><h3>Rule-Controlled Search</h3><p>One run searches companies, checks every internal identity signal, and reviews available public equipment evidence.</p></div><span class="demo-data-label">Controlled demo results</span></header>
+      <div class="prospect-fields"><label class="field"><span>Territory</span><select id="prospectTerritory">${["All", "Indiana", "Ohio", "Kentucky", "Michigan"].map((value) => `<option value="${value}" ${value === params.territory ? "selected" : ""}>${value}</option>`).join("")}</select></label><label class="field"><span>Market</span><select id="prospectMarket">${["All", "Geotechnical", "Environmental"].map((value) => `<option value="${value}" ${value === params.market ? "selected" : ""}>${value}</option>`).join("")}</select></label><label class="field"><span>Search radius</span><select id="prospectRadius">${["50", "100", "250", "Statewide"].map((value) => `<option value="${value}" ${value === params.radius ? "selected" : ""}>${value}${/^\d+$/.test(value) ? " miles" : ""}</option>`).join("")}</select></label><label class="field field--wide"><span>Required terms</span><input id="prospectKeywords" value="${escapeHTML(params.keywords)}" placeholder="drilling, geotechnical, environmental..."></label></div>
+      <div class="prospect-rules"><label><input type="checkbox" checked disabled> Check customers, aliases, branches, domains, phones, addresses, and purchase history</label><label><input id="prospectVisual" type="checkbox" ${params.visual ? "checked" : ""}> Review public images for equipment evidence</label><span>Observed equipment is evidence only. Ownership stays unconfirmed until supported by records or a rep.</span><button type="button" class="primary-button" data-run-prospect>Run Prospect Search</button></div>
+    </section><section id="prospectResults" class="prospect-results"></section></div>`;
+  renderProspectResults();
+}
+
+function renderCallListWorkspace() {
+  const today = new Date();
+  const queue = customers.map((customer) => {
+    const lastTouch = customerLastTouch(customer);
+    const days = Math.max(0, Math.floor((today - new Date(`${lastTouch}T00:00:00`)) / 86400000));
+    return { customer, lastTouch, days, dueDate: addDays(lastTouch, 90) };
+  }).filter((item) => item.days >= 75).sort((a, b) => b.days - a.days);
+  elements.overlayBody.innerHTML = `<div class="workbench operations-workbench">
+    <div class="operations-toolbar"><div><strong>Every customer touched within 90 days</strong><span>Dormant customers first, then customers approaching their review date. The rep decides who to call.</span></div><span class="record-count">Updated ${new Date().toLocaleDateString()}</span></div>
+    <div class="metric-grid"><div><span>Overdue</span><strong>${queue.filter((item) => item.days >= 90).length}</strong></div><div><span>Due within 15 days</span><strong>${queue.filter((item) => item.days >= 75 && item.days < 90).length}</strong></div><div><span>Queue total</span><strong>${queue.length}</strong></div><div><span>Goal</span><strong>90 days</strong></div></div>
+    <section class="operations-panel"><header><div><h3>Today’s Call List</h3><p>Logging a call immediately recalculates the queue.</p></div></header><div class="table-scroll"><table class="data-table"><thead><tr><th>Priority</th><th>Customer</th><th>Last touch</th><th>Days</th><th>Due date</th><th>Contact</th><th>Action</th></tr></thead><tbody>${queue.map(({ customer, lastTouch, days, dueDate }) => `<tr><td><span class="status-label ${days >= 90 ? "status-label--blocked" : "status-label--warn"}">${days >= 90 ? "Dormant / overdue" : "Due soon"}</span></td><td><button type="button" class="link-button" data-call-profile="${customer.id}">${escapeHTML(customer.name)}</button></td><td>${formatDate(lastTouch)}</td><td><strong>${days}</strong></td><td>${formatDate(dueDate)}</td><td>${escapeHTML(customer.contact)}<br><small>${escapeHTML(customer.phone)}</small></td><td><button type="button" class="table-button" data-log-call="${customer.id}">Log Call</button></td></tr>`).join("") || '<tr><td colspan="7">Every customer is currently inside the 90-day goal.</td></tr>'}</tbody></table></div></section></div>`;
+}
+
+function renderCalibrationTrainingWorkspace() {
+  elements.overlayBody.innerHTML = `<div class="workbench training-workbench"><div class="training-intro"><span>Practice only</span><h3>Calibration Call Training</h3><p>Run the customer conversation without touching a real customer, calibration record, or quote.</p></div><div class="training-grid"><button type="button" data-training-scenario="calibration-due"><strong>Calibration Due</strong><span>Customer needs scheduling and a quote.</span></button><button type="button" data-training-scenario="missing-history"><strong>Missing History</strong><span>Confirm the hammer and determine the next step.</span></button><button type="button" data-training-scenario="failed-result"><strong>Failed Result</strong><span>Handle the follow-up and escalation.</span></button></div><section id="trainingStage" class="training-stage"><strong>Select a practice scenario.</strong></section></div>`;
+}
+
+function renderWorkflowTrainingWorkspace() {
+  elements.overlayBody.innerHTML = `<div class="workbench training-workbench"><div class="training-intro"><span>Practice only</span><h3>Customer Workflow Training</h3><p>Fake prompts can search real demo records and build dummy quotes without changing operational data.</p></div><div class="training-grid"><button type="button" data-training-scenario="first-call"><strong>First Customer Call</strong><span>Identify the customer, rig, and immediate need.</span></button><button type="button" data-training-scenario="part-search"><strong>Unknown Part Search</strong><span>Work from description to a verified result.</span></button><button type="button" data-training-scenario="quote-run"><strong>Full Quote Run</strong><span>Build a dummy quote from the customer request.</span></button></div><section id="trainingStage" class="training-stage"><strong>Select a practice scenario.</strong></section></div>`;
+}
+
+function renderTrainingScenario(id) {
+  const stage = $("#trainingStage");
+  if (!stage) return;
+  const scenarios = {
+    "calibration-due": ["Atlas Geotechnical calls about an automatic hammer nearing its annual date.", "Confirm customer and hammer", "Review calibration history", "Schedule service", "Build dummy quote"],
+    "missing-history": ["A customer has a hammer but no confirmed calibration record.", "Collect identification", "Search customer and rig records", "Mark the GAP", "Set follow-up"],
+    "failed-result": ["A completed test needs technical review before release.", "Do not promise a pass", "Escalate the result", "Document the call", "Set customer follow-up"],
+    "first-call": ["A caller gives a company nickname, a rig description, and a tooling problem.", "Find the customer", "Confirm the rig", "Clarify the need", "Choose the workspace"],
+    "part-search": ["The caller says: ‘I need the cutterhead for our hollow-stem setup.’", "Collect diameter", "Collect connection", "Preserve constraints", "Return the result or GAP"],
+    "quote-run": ["Build a practice quote containing tooling, one rig part, freight, and tax.", "Select customer", "Add verified lines", "Adjust quantity and price", "Save dummy quote"],
+  };
+  const [prompt, ...steps] = scenarios[id] || ["Practice scenario", "Review the request"];
+  stage.innerHTML = `<span class="status-label">Active practice</span><h3>${escapeHTML(prompt)}</h3><ol>${steps.map((step) => `<li><label><input type="checkbox"> ${escapeHTML(step)}</label></li>`).join("")}</ol><button type="button" class="primary-button" data-complete-training>Complete Practice</button>`;
+}
+
 function handleOverlayInput(event) {
   const target = event.target;
   if (target.id === "toolSearch") {
-    state.tooling.query = target.value;
+    const toolState = activeToolingState();
+    toolState.query = target.value;
     clearTimeout(state.searchTimer);
     state.searchTimer = setTimeout(() => {
-      const detected = detectBuilder(state.tooling.query);
-      if (detected && detected !== state.tooling.builder) { state.tooling.builder = detected; state.tooling.filters = {}; $("#toolBuilderHost").innerHTML = renderToolingBuilder(); }
-      renderToolingResults();
+      const detected = detectBuilder(toolState.query);
+      toolState.scope = "All";
+      toolState.selectedId = "";
+      if (detected !== toolState.builder) { toolState.builder = detected; toolState.filters = {}; }
+      updateToolingModeSurface();
     }, 90);
   }
   if (target.id === "inventorySearch") {
@@ -891,17 +1103,9 @@ function handleOverlayInput(event) {
     state.searchTimer = setTimeout(renderBomTree, 90);
   }
   if (target.matches("[data-builder-field]")) {
-    state.tooling.filters[target.dataset.builderField] = target.type === "checkbox" ? target.checked : target.value;
-    if (target.dataset.builderField === "serial" && state.tooling.builder === "moyno") {
-      const serial = target.value.trim();
-      $("[data-moyno-serial-warning]")?.toggleAttribute("hidden", Boolean(serial));
-      document.querySelectorAll("[data-moyno-model]").forEach((button) => {
-        button.disabled = !serial || button.dataset.moynoQuotable !== "true";
-        button.dataset.description = `Moyno ${button.dataset.moynoModel} ${button.dataset.moynoComponent} - pump serial ${serial}`;
-      });
-    } else if (target.tagName === "SELECT" || event.type === "change") {
-      $("#toolBuilderHost").innerHTML = renderToolingBuilder();
-    }
+    const toolState = activeToolingState();
+    toolState.filters[target.dataset.builderField] = target.type === "checkbox" ? target.checked : target.value;
+    if (target.tagName === "SELECT" || event.type === "change") $("#toolBuilderHost").innerHTML = renderToolingBuilder();
   }
   if (target.matches("[data-stock-part]")) {
     const stock = getStock(target.dataset.stockPart);
@@ -935,15 +1139,57 @@ elements.overlayBody.addEventListener("input", handleOverlayInput);
 elements.overlayBody.addEventListener("change", (event) => {
   handleOverlayInput(event);
   const target = event.target;
-  if (target.id === "toolFamilyFilter") { state.tooling.family = target.value; renderToolingResults(); }
   if (target.id === "bomRigSelect") { state.bom.serial = target.value; state.bom.section = ""; state.bom.selectedPart = ""; renderBomWorkspace(); }
+  if (target.id === "calibrationCustomerSelect") { state.calibrationCustomerId = target.value; renderCalibrationWorkspace(); }
+  if (target.matches("[data-rig-stage]")) { rigSalesOpportunities[Number(target.dataset.rigStage)].stage = target.value; renderRigSalesWorkspace(); }
 });
 
 elements.overlayBody.addEventListener("click", (event) => {
+  if (event.target.closest("[data-schedule-calibration-workspace]")) { const customer = customers.find((item) => item.id === state.calibrationCustomerId); state.quote.customerId = customer?.id || ""; addQuoteLine("CAL-SERVICE", "Automatic hammer calibration service", 0, "Calibration workspace"); openWorkspace("quotes"); return; }
+  if (event.target.closest("[data-demo-certificate]")) { showToast("Calibration certificate opened in demo mode"); return; }
+  if (event.target.closest("[data-rig-new]")) { rigSalesOpportunities.unshift({ company: "New opportunity", territory: "Unassigned", rig: "TBD", stage: "New", value: 0, next: "Complete needs analysis" }); renderRigSalesWorkspace(); return; }
+  const rigQuote = event.target.closest("[data-rig-quote]");
+  if (rigQuote) { const opportunity = rigSalesOpportunities[Number(rigQuote.dataset.rigQuote)]; state.quote.notes = `Rig sales opportunity: ${opportunity.company} · ${opportunity.rig}`; openWorkspace("quotes"); return; }
+  if (event.target.closest("[data-run-prospect]")) {
+    state.prospectParams = { territory: $("#prospectTerritory").value, market: $("#prospectMarket").value, radius: $("#prospectRadius").value, keywords: $("#prospectKeywords").value, visual: $("#prospectVisual").checked };
+    const keywordTerms = normalize(state.prospectParams.keywords).split(" ").filter(Boolean);
+    const radiusLimit = /^\d+$/.test(state.prospectParams.radius) ? Number(state.prospectParams.radius) : Infinity;
+    state.prospectResults = prospectCandidates.filter((candidate) => {
+      const searchable = normalize(`${candidate.company} ${candidate.market} ${candidate.tags}`);
+      return (state.prospectParams.territory === "All" || candidate.territory === state.prospectParams.territory)
+        && (state.prospectParams.market === "All" || candidate.market === state.prospectParams.market)
+        && candidate.distance <= radiusLimit
+        && keywordTerms.every((term) => searchable.includes(term));
+    });
+    renderProspectResults(); showToast("Prospect search, customer comparison, and equipment review complete"); return;
+  }
+  const prospectCustomer = event.target.closest("[data-prospect-customer]");
+  if (prospectCustomer) { closeWorkspace(); openCustomerWorkspace(prospectCustomer.dataset.prospectCustomer); return; }
+  if (event.target.closest("[data-start-prospect]")) { showToast("Prospect record started in demo mode"); return; }
+  if (event.target.closest("[data-review-evidence]")) { showToast("Evidence source opened in demo mode"); return; }
+  const logCall = event.target.closest("[data-log-call]");
+  if (logCall) { const customer = customers.find((item) => item.id === logCall.dataset.logCall); const today = new Date().toISOString().slice(0, 10); state.touches[customer.id] = today; customer.interactions.unshift({ type: "Call", date: today, text: "Customer touch logged from Daily Call List", owner: "Current rep" }); safeSave("mdb-demo-touches", state.touches); renderCallListWorkspace(); showToast(`${customer.name} moved out of the 90-day queue`); return; }
+  const callProfile = event.target.closest("[data-call-profile]");
+  if (callProfile) { closeWorkspace(); openCustomerWorkspace(callProfile.dataset.callProfile); return; }
+  const trainingScenario = event.target.closest("[data-training-scenario]");
+  if (trainingScenario) { renderTrainingScenario(trainingScenario.dataset.trainingScenario); return; }
+  if (event.target.closest("[data-complete-training]")) { showToast("Practice completed — no operational records changed"); return; }
+  if (event.target.closest("#browseToolingButton")) {
+    const toolState = activeToolingState();
+    toolState.browseOpen = !toolState.browseOpen;
+    $("#toolBrowsePanel").hidden = !toolState.browseOpen;
+    $("#browseToolingButton").setAttribute("aria-expanded", String(toolState.browseOpen));
+    return;
+  }
   const builder = event.target.closest("[data-tool-builder]");
-  if (builder) { state.tooling.builder = builder.dataset.toolBuilder; state.tooling.filters = {}; renderToolingWorkspace(); return; }
+  if (builder) { const toolState = activeToolingState(); toolState.builder = builder.dataset.toolBuilder; toolState.filters = {}; toolState.query = ""; toolState.scope = "All"; toolState.selectedId = ""; toolState.browseOpen = false; renderActiveToolingWorkspace(); return; }
+  const scope = event.target.closest("[data-tool-scope]");
+  if (scope) { const toolState = activeToolingState(); toolState.scope = scope.dataset.toolScope; toolState.builder = ""; toolState.filters = {}; toolState.query = ""; toolState.selectedId = ""; toolState.browseOpen = false; renderActiveToolingWorkspace(); return; }
+  if (event.target.closest("[data-tool-reset]")) { const toolState = activeToolingState(); Object.assign(toolState, { query: "", scope: "All", builder: "", filters: {}, selectedId: "", browseOpen: false }); renderActiveToolingWorkspace(); return; }
+  const historySearch = event.target.closest("[data-customer-history-search]");
+  if (historySearch) { const toolState = activeToolingState(); toolState.query = historySearch.dataset.customerHistorySearch; toolState.scope = "All"; toolState.builder = detectBuilder(toolState.query); toolState.filters = {}; toolState.selectedId = ""; toolState.browseOpen = false; renderActiveToolingWorkspace(); $("#toolSearch")?.focus(); return; }
   const result = event.target.closest("[data-tool-id]");
-  if (result) { state.tooling.selectedId = result.dataset.toolId; $$(".tool-result").forEach((button) => button.classList.toggle("is-selected", button === result)); renderToolDetail(state.toolItems.find((item) => item.id === state.tooling.selectedId)); return; }
+  if (result) { const toolState = activeToolingState(); toolState.selectedId = result.dataset.toolId; $$(".tool-result").forEach((button) => button.classList.toggle("is-selected", button === result)); renderToolDetail(state.toolItems.find((item) => item.id === toolState.selectedId)); return; }
   const add = event.target.closest("[data-add-part]");
   if (add && !add.disabled) { addQuoteLine(add.dataset.addPart, add.dataset.description, Number(getStock(add.dataset.addPart).unitPrice)); return; }
   const section = event.target.closest("[data-bom-section]");
@@ -962,7 +1208,13 @@ elements.customerBackButton.addEventListener("click", showHome);
 elements.overlayBackButton.addEventListener("click", closeWorkspace);
 elements.overlayCloseButton.addEventListener("click", closeWorkspace);
 
-$$('[data-open]').forEach((button) => button.addEventListener("click", () => button.dataset.open === "customer" ? openCustomerWorkspace() : openWorkspace(button.dataset.open)));
+function navigateWorkspace(type) {
+  if (type === "home") showHome();
+  else if (type === "customer") openCustomerWorkspace();
+  else openWorkspace(type);
+}
+
+$$('[data-open]').forEach((button) => button.addEventListener("click", () => navigateWorkspace(button.dataset.open)));
 
 document.addEventListener("click", (event) => {
   const workspaceButton = event.target.closest("[data-workspace]");
@@ -971,6 +1223,7 @@ document.addEventListener("click", (event) => {
   if (bomButton) openWorkspace("bom", { serial: bomButton.dataset.openBom });
   const customerButton = event.target.closest("[data-customer-id]");
   if (customerButton) selectCustomer(customerButton.dataset.customerId);
+  if (event.target.closest("[data-customer-tooling]")) openWorkspace("customerTooling");
   if (event.target.closest("[data-schedule-calibration]")) {
     addQuoteLine("CAL-SERVICE", "Automatic hammer calibration service", 0, "Calibration workspace");
     elements.calibrationMenu.hidden = true;

@@ -8,8 +8,8 @@
       content="Mobile Drill Brain operational workspace demo."
     >
     <title>Mobile Drill Brain</title>
-    <link rel="stylesheet" href="styles.css">
-    <script src="app.js" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260814-2">
+    <script src="app.js?v=20260814-2" defer></script>
   </head>
 
   <body>
@@ -26,6 +26,39 @@
       </button>
       <span class="demo-pill">MDB Demo</span>
     </header>
+
+    <nav id="workspaceNav" class="workspace-nav" aria-label="MDB workspaces">
+      <button type="button" data-open="home">
+        <span class="workspace-nav-icon" aria-hidden="true">H</span><span>Home</span>
+      </button>
+
+      <div class="workspace-nav-group">
+        <strong>Daily Work</strong>
+        <button type="button" data-open="customer"><span class="workspace-nav-icon" aria-hidden="true">C</span><span>Customers</span></button>
+        <button type="button" data-open="tooling"><span class="workspace-nav-icon" aria-hidden="true">T</span><span>Tooling</span></button>
+        <button type="button" data-open="quotes"><span class="workspace-nav-icon" aria-hidden="true">Q</span><span>Quotes</span></button>
+        <button type="button" data-open="inventory"><span class="workspace-nav-icon" aria-hidden="true">I</span><span>Inventory</span></button>
+        <button type="button" data-open="bom"><span class="workspace-nav-icon" aria-hidden="true">B</span><span>Rig / BOM</span></button>
+      </div>
+
+      <div class="workspace-nav-group">
+        <strong>Rig Sales &amp; Calibration</strong>
+        <button type="button" data-open="rigSales"><span class="workspace-nav-icon" aria-hidden="true">R</span><span>Rig Sales</span></button>
+        <button type="button" data-open="calibration"><span class="workspace-nav-icon" aria-hidden="true">K</span><span>Calibration</span></button>
+      </div>
+
+      <div class="workspace-nav-group">
+        <strong>Customer Development</strong>
+        <button type="button" data-open="prospects"><span class="workspace-nav-icon" aria-hidden="true">P</span><span>New Prospects</span></button>
+        <button type="button" data-open="callList"><span class="workspace-nav-icon" aria-hidden="true">D</span><span>Daily Call List</span></button>
+      </div>
+
+      <div class="workspace-nav-group">
+        <strong>Training</strong>
+        <button type="button" data-open="calibrationTraining"><span class="workspace-nav-icon" aria-hidden="true">CT</span><span>Calibration Training</span></button>
+        <button type="button" data-open="workflowTraining"><span class="workspace-nav-icon" aria-hidden="true">WT</span><span>Workflow Training</span></button>
+      </div>
+    </nav>
 
     <main id="mainContent" class="application">
       <section id="homeView" class="home-view" aria-label="MDB home">
@@ -47,28 +80,34 @@
           <div id="globalSearchResults" class="search-results" role="listbox" hidden></div>
         </div>
 
-        <nav class="quick-nav" aria-label="Primary workspaces">
-          <button type="button" data-open="customer">
-            <span class="quick-icon quick-icon--customer" aria-hidden="true"></span>
-            <span>Customer</span>
-          </button>
-          <button type="button" data-open="tooling">
-            <span class="quick-icon quick-icon--tooling" aria-hidden="true"></span>
-            <span>Tooling</span>
-          </button>
-          <button type="button" data-open="quotes">
-            <span class="quick-icon quick-icon--quotes" aria-hidden="true"></span>
-            <span>Quotes</span>
-          </button>
-          <button type="button" data-open="inventory">
-            <span class="quick-icon quick-icon--inventory" aria-hidden="true"></span>
-            <span>Inventory</span>
-          </button>
-          <button type="button" data-open="bom">
-            <span class="quick-icon quick-icon--bom" aria-hidden="true"></span>
-            <span>Rig / BOM</span>
-          </button>
-        </nav>
+        <div class="home-workspace-groups">
+          <section>
+            <h2>Daily Work</h2>
+            <nav class="quick-nav" aria-label="Daily workspaces">
+              <button type="button" data-open="customer"><span class="quick-icon quick-icon--customer" aria-hidden="true"></span><span>Customer</span></button>
+              <button type="button" data-open="tooling"><span class="quick-icon quick-icon--tooling" aria-hidden="true"></span><span>Tooling</span></button>
+              <button type="button" data-open="quotes"><span class="quick-icon quick-icon--quotes" aria-hidden="true"></span><span>Quotes</span></button>
+              <button type="button" data-open="inventory"><span class="quick-icon quick-icon--inventory" aria-hidden="true"></span><span>Inventory</span></button>
+              <button type="button" data-open="bom"><span class="quick-icon quick-icon--bom" aria-hidden="true"></span><span>Rig / BOM</span></button>
+            </nav>
+          </section>
+          <section>
+            <h2>Rig Sales &amp; Calibration</h2>
+            <nav class="quick-nav quick-nav--two" aria-label="Rig sales and calibration workspaces">
+              <button type="button" data-open="rigSales"><span class="quick-icon" aria-hidden="true">R</span><span>Rig Sales</span></button>
+              <button type="button" data-open="calibration"><span class="quick-icon" aria-hidden="true">K</span><span>Calibration</span></button>
+            </nav>
+          </section>
+          <section>
+            <h2>Customer Development &amp; Training</h2>
+            <nav class="quick-nav quick-nav--four" aria-label="Development and training workspaces">
+              <button type="button" data-open="prospects"><span class="quick-icon" aria-hidden="true">P</span><span>New Prospects</span></button>
+              <button type="button" data-open="callList"><span class="quick-icon" aria-hidden="true">D</span><span>Daily Call List</span></button>
+              <button type="button" data-open="calibrationTraining"><span class="quick-icon" aria-hidden="true">CT</span><span>Calibration Training</span></button>
+              <button type="button" data-open="workflowTraining"><span class="quick-icon" aria-hidden="true">WT</span><span>Workflow Training</span></button>
+            </nav>
+          </section>
+        </div>
       </section>
 
       <section id="customerView" class="customer-view" aria-label="Customer Profile workspace" hidden>
