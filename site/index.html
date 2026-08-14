@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="Mobile Drill Brain internal demo for progressive expert navigation."
+    >
+    <title>Mobile Drill Brain | Progressive Entry Demo</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+
+  <body>
+    <a class="skip-link" href="#main-content">Skip to the MDB entry</a>
+
+    <header class="app-header">
+      <a class="brand" href="#main-content" aria-label="Mobile Drill Brain home">
+        <span class="brand-mark" aria-hidden="true">MDB</span>
+        <span class="brand-copy">
+          <span class="brand-kicker">Mobile Drill International</span>
+          <span class="brand-name">Mobile Drill Brain</span>
+        </span>
+      </a>
+
+      <div class="header-status" aria-label="Application status">
+        <span class="status-dot" aria-hidden="true"></span>
+        Internal reasoning demo
+      </div>
+    </header>
+
+    <main id="main-content" class="app-shell">
+      <section class="entry-section" aria-labelledby="entry-title">
+        <div class="entry-copy">
+          <span class="section-label">Universal entry</span>
+          <h1 id="entry-title">Start with what you know.</h1>
+          <p>
+            Enter a part number, tooling item, rig serial, assembly, model,
+            customer need, or machine problem. MDB will interpret the request,
+            route it, and ask only the next useful question.
+          </p>
+        </div>
+
+        <form id="universalSearch" class="universal-search" novalidate>
+          <label class="sr-only" for="searchInput">What do you know?</label>
+          <div class="search-control">
+            <span class="search-icon" aria-hidden="true"></span>
+            <input
+              id="searchInput"
+              name="query"
+              type="search"
+              autocomplete="off"
+              spellcheck="false"
+              aria-describedby="searchHelp searchError"
+              placeholder="Try: drive cap, B57 rotary, 217962, Moyno 3L6..."
+            >
+            <button type="submit">Route request</button>
+          </div>
+          <p id="searchHelp" class="search-help">
+            Search finds possible matches. Authority and compatibility decide
+            what MDB can safely do next.
+          </p>
+          <p id="searchError" class="search-error" role="alert"></p>
+        </form>
+
+        <div class="examples" aria-label="Example searches">
+          <span>Try an example</span>
+          <button type="button" class="example-query" data-query="drive cap">
+            drive cap
+          </button>
+          <button type="button" class="example-query" data-query="split spoon">
+            split spoon
+          </button>
+          <button type="button" class="example-query" data-query="B57 rotary">
+            B57 rotary
+          </button>
+          <button type="button" class="example-query" data-query="Moyno 3L6">
+            Moyno 3L6
+          </button>
+          <button
+            type="button"
+            class="example-query"
+            data-query="rotary won't turn"
+          >
+            rotary won't turn
+          </button>
+        </div>
+      </section>
+
+      <section
+        id="reasoningPanel"
+        class="reasoning-panel"
+        aria-labelledby="reasoningTitle"
+        aria-live="polite"
+        hidden
+      >
+        <div class="panel-header">
+          <div>
+            <span class="section-label section-label--light">MDB reasoning path</span>
+            <h2 id="reasoningTitle">Understanding your request</h2>
+          </div>
+          <span id="routeBadge" class="route-badge">Routing</span>
+        </div>
+
+        <div id="reasoningBody" class="reasoning-body"></div>
+
+        <div id="questionStage" class="question-stage" hidden>
+          <div class="question-heading">
+            <span id="questionCount" class="question-count"></span>
+            <h3 id="questionText"></h3>
+            <p id="questionHelp"></p>
+          </div>
+          <div id="answerOptions" class="answer-options"></div>
+        </div>
+
+        <div id="resultStage" class="result-stage" hidden>
+          <div id="resultBody"></div>
+          <div class="result-actions">
+            <button id="refineButton" class="secondary-button" type="button">
+              Refine this request
+            </button>
+            <button id="newSearchButton" class="text-button" type="button">
+              Start a new entry
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="doctrine-strip" aria-label="MDB search doctrine">
+        <div>
+          <span class="doctrine-number">01</span>
+          <strong>Interpret</strong>
+          <span>Detect intent without forcing a menu choice.</span>
+        </div>
+        <div>
+          <span class="doctrine-number">02</span>
+          <strong>Protect</strong>
+          <span>Apply source, compatibility, and safety gates.</span>
+        </div>
+        <div>
+          <span class="doctrine-number">03</span>
+          <strong>Narrow</strong>
+          <span>Ask one useful question, then reveal the next.</span>
+        </div>
+        <div>
+          <span class="doctrine-number">04</span>
+          <strong>Act</strong>
+          <span>Return a labeled next step, never a silent guess.</span>
+        </div>
+      </section>
+
+      <section class="workspace-summary" aria-labelledby="workspace-title">
+        <div class="workspace-heading">
+          <div>
+            <span class="section-label">Expert navigation areas</span>
+            <h2 id="workspace-title">The workspaces sit behind the entry.</h2>
+          </div>
+          <p>
+            They are routing destinations, not a menu the user has to understand
+            before asking for help.
+          </p>
+        </div>
+
+        <div class="workspace-grid">
+          <article class="workspace-card workspace-card--tooling">
+            <span class="workspace-number">004</span>
+            <h3>Tooling</h3>
+            <p>Family, dimensions, connection, CTS rules, and compatibility.</p>
+            <span class="workspace-rule">CTS + WS004 control execution</span>
+          </article>
+
+          <article class="workspace-card workspace-card--parts">
+            <span class="workspace-number">002/003</span>
+            <h3>Rig Parts</h3>
+            <p>Serial-specific BOM navigation, assemblies, and Where Used.</p>
+            <span class="workspace-rule">Serial before quote-ready part</span>
+          </article>
+
+          <article class="workspace-card workspace-card--rigs">
+            <span class="workspace-number">005</span>
+            <h3>Rig Sales</h3>
+            <p>Model reference, controlled comparisons, and guided selection.</p>
+            <span class="workspace-rule">Reference or guided-selling mode</span>
+          </article>
+
+          <article class="workspace-card workspace-card--trouble">
+            <span class="workspace-number">007</span>
+            <h3>Troubleshooting</h3>
+            <p>Symptom-first safety, system isolation, and escalation.</p>
+            <span class="workspace-rule">No symptom-to-part shortcut</span>
+          </article>
+
+          <article class="workspace-card workspace-card--calibration">
+            <span class="workspace-number">006</span>
+            <h3>Calibration</h3>
+            <p>SPT service, training, scheduling, and data-quality support.</p>
+            <span class="workspace-rule">Support, not final report authority</span>
+          </article>
+
+          <article class="workspace-card workspace-card--knowledge">
+            <span class="workspace-number">008</span>
+            <h3>Reference &amp; Training</h3>
+            <p>Concept explanations, call preparation, practice, and routing.</p>
+            <span class="workspace-rule">Teach first; route when intent changes</span>
+          </article>
+        </div>
+      </section>
+
+      <aside class="demo-boundary" aria-label="Demo data boundary">
+        <span class="boundary-icon" aria-hidden="true">i</span>
+        <p>
+          <strong>Demo boundary:</strong> this front end uses safe, built-in
+          scenarios. It does not expose raw documents, spreadsheets, pricing,
+          inventory, or live serial-BOM records.
+        </p>
+      </aside>
+    </main>
+
+    <footer class="app-footer">
+      <span>Mobile Drill Brain</span>
+      <span>Current working demo</span>
+      <span>Search result is not a recommendation</span>
+    </footer>
+  </body>
+</html>
