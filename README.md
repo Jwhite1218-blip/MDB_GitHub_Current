@@ -22,6 +22,8 @@ For tooling execution, current CTS documents and WS004 govern. They override sta
 
 The deployable static MDB demo. Netlify must publish this directory only.
 
+`site/data/` contains browser-ready, normalized demo records derived from the controlled source workbooks and current WS004 build. It does not contain the raw workbooks or controlled documents.
+
 Recommended Netlify settings:
 
 - Base directory: repository root
@@ -104,13 +106,17 @@ The current operational demo proves the daily-work foundation:
 3. A streamlined Customer Profile with customer facts, complete purchase history, confirmed rigs, Tooling DNA, calibration history, and interactions
 4. Direct serial-to-BOM navigation
 5. Workspace overlays that preserve the employee's place
-6. Calibration-to-quote handoff and a functional session-only demo Quote Builder
+6. Full B57 `2025023` and B37X `2025028` serial BOM navigation: 25 sections, 162 assemblies, 1,400 relationships, 980 searchable rig items, and Where Used detail
+7. Full flexible tooling search: 1,253 indexed records plus current WS004 supplements for Drive Caps, Split Spoons, HEX-COR / STD Duty, and Moyno
+8. Executable family controls for Drive Cap, HSA Auger, Split Spoon, HEX-COR / STD Duty, and Moyno
+9. Editable local demo fields for on-hand, allocated, bin, and unit price across Inventory, BOM detail, and Tooling detail
+10. Calibration-to-quote handoff and a persistent local dummy Quote Builder with quantity, price, discount, freight, tax, and totals
 
-The browser demo uses controlled, built-in records to demonstrate full interaction patterns. Demo part numbers, inventory quantities, quote values, customer details, and BOM rows are not production truth. It does not load or expose the raw files in `docs/` or `data/`, and it does not claim live pricing, inventory, serial-BOM, or quote-ready truth.
+The browser demo uses normalized records generated from the repository source set. The B57/B37X BOM hierarchy and tooling catalog depth are real source-derived demo data; current GP verification is still pending wherever the source says so. Inventory quantities, prices, quote values, and customer details remain editable demo values and are not production truth. The site does not load or expose the raw files in repository-level `docs/` or `data/`, and it does not claim live GP pricing, inventory, ordering, or invoicing.
 
 Training and Knowledge Chapter surfaces are intentionally separate from the normal operational workspace. Current CTS, WS004, compatibility, safety, and authority rules remain execution controls behind the interface rather than user-facing training steps.
 
 ## Run the demo
 
-Open `site/index.html` directly in a browser or serve the `site/` directory with any static web server. No build step is required.
+Serve the `site/` directory with any static web server. No build step is required. Direct `file://` opening is not supported because the browser loads the normalized JSON data files at runtime.
 
