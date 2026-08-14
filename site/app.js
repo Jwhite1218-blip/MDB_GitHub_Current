@@ -44,6 +44,7 @@ const state = {
   customerTooling: { query: "", scope: "All", builder: "", filters: {}, selectedId: "", browseOpen: false },
   prospectResults: [],
   prospectParams: { territory: "Midwest", market: "All", radius: "100", keywords: "drilling geotechnical", visual: true },
+  workflowTraining: { scenarioId: "first-call", messages: [], matchedKcs: ["KC001"] },
   calibrationCustomerId: "",
   bom: { serial: "2025023", section: "", query: "", selectedPart: "" },
   toastTimer: null,
@@ -153,6 +154,45 @@ const prospectCandidates = [
   { company: "Desert Core Services", territory: "Southwest", state: "Arizona", market: "Environmental", distance: 81, tags: "drilling environmental geotechnical coring", domain: "desertcore.example.invalid", accountCheck: "No customer, alias, domain, phone, address, or purchase-history match", equipment: "Crawler drill observed", possibleModel: "Brand unclear", confidence: "Low", evidence: "Services page image", ownership: "Ownership unconfirmed" },
   { company: "Pacific Geo Borings", territory: "West", state: "California", market: "Geotechnical", distance: 67, tags: "drilling geotechnical test boring spt", domain: "pacificgeo.example.invalid", accountCheck: "No customer, alias, domain, phone, address, or purchase-history match", equipment: "Mobile Drill mast decal observed", possibleModel: "Possible B37X", confidence: "Medium", evidence: "Public project photo", ownership: "Ownership unconfirmed" },
 ];
+
+const kcTrainingKnowledge = [
+  { id: "KC001", title: "MDB Philosophy", keywords: "mdb source authority confidence search reasoning history invent verify", guidance: "Start with the customer’s intent, preserve the reasoning, label the source, and never invent a confident answer when the evidence is incomplete.", next: "What does the customer need right now, and what source can prove the answer?" },
+  { id: "KC002", title: "Rig Anatomy", keywords: "rig model serial engine hydraulic mechanical rotary feed power torque anatomy energy symptom", guidance: "Follow energy from the engine through the mechanical or hydraulic drive, then through rotary/feed and into the tooling interface. Isolate the failed system before naming parts.", next: "Which function stopped, and what still works normally?" },
+  { id: "KC003", title: "Hollow Stem Auger", keywords: "hsa hollow stem auger sampling retrieval borehole plug rod split spoon", guidance: "Treat HSA as one operating system: external augers advance the hole while the hollow center preserves the internal sampling path. Size, connection, rod family, sampling setup, and retrieval all matter.", next: "What HSA size, connection family, and sampling method are they running?" },
+  { id: "KC004", title: "Drill Rod", keywords: "drill rod aw awj nw nwj thread joint length sampling rotary", guidance: "Identify the rod family and joint or thread before narrowing components. Diameter alone is not enough, and rod history is not compatibility proof.", next: "Which rod family, joint, length, and drilling method are confirmed?" },
+  { id: "KC005", title: "Split Spoon", keywords: "split spoon spt shoe head body sampler thread sample sampling", guidance: "Keep the split spoon body, head, shoe style, and rod connection distinct. SPT use establishes the sampling workflow but does not remove thread and style verification.", next: "What body size, rod thread, and shoe style does the customer need?" },
+  { id: "KC006", title: "Center Plug", keywords: "center plug pilot bit hsa protect hollow stem retrieval", guidance: "Center-plug selection depends on the HSA system, rod family, pilot or bit configuration, and retrieval approach. Do not treat the plug as a size-only item.", next: "Which HSA size, rod family, and pilot or retrieval setup are confirmed?" },
+  { id: "KC007", title: "Drive Cap", keywords: "drive cap rotary box spindle key bolt hex connection machine tooling interface", guidance: "Verify both sides of the drive cap: the rig or rotary output side and the auger or tooling side. A match on only one side is not quote-ready.", next: "What rig/rotary output and what tooling size/connection must the cap join?" },
+  { id: "KC008", title: "Cutter Head", keywords: "cutter head cutterhead teeth carbide formation soil clay rock wear bullet", guidance: "Begin with the drilling application, formation, HSA size, and connection. Keep cutterhead style neutral until the customer’s conditions create a reason to choose one.", next: "What formation are they drilling, and what size and connection are on the auger?" },
+  { id: "KC009", title: "HSA Auger Sections", keywords: "auger section flight connection key length repair wear corrosion hsa", guidance: "Keep HSA connection variants distinct. Confirm size, connection, variant, and length, then consider wear and repair economics without mixing families.", next: "What diameter, connection variant, and section length are physically confirmed?" },
+  { id: "KC010", title: "HEX-COR", keywords: "hex cor hexcor solid stem auger fish tail stinger dp cutter shank", guidance: "HEX-COR is a solid-stem system with its own hex connection logic. Confirm product, hex family, hole size, length, and cutting tool without borrowing HSA assumptions.", next: "Which HEX-COR product, connection, hole size, length, and cutting condition apply?" },
+  { id: "KC011", title: "Air & Mud Rotary", keywords: "air mud rotary tricone drag bit swivel circulation cuttings formation water", guidance: "Identify the circulating medium, rod family, bit family, swivel requirement, formation, and depth. A tricone request is for a complete bit unless the customer clearly asks for a component.", next: "Are they drilling with air or mud, and what rod, bit, formation, and depth are involved?" },
+  { id: "KC012", title: "Coring & Casing", keywords: "coring casing nq nq2 hwt core barrel wireline advancement unstable ground", guidance: "Keep core recovery and casing advancement workflows distinct. Support confirmed NQ/NQ2 and HWT paths, and escalate vendor- or engineering-dependent exceptions.", next: "Is the goal core recovery or borehole control, and which system size is confirmed?" },
+  { id: "KC013", title: "Rig Selection", keywords: "rig model serial selection b57 b37x b80 carrier mechanical hydraulic rpm torque mast method", guidance: "Start with constraints and drilling method, then carrier and operator workflow, then specifications. Use B57 as the mechanical anchor and B37X as the hydraulic anchor; move to sister rigs only for a clear gap.", next: "What method, depth, torque/RPM need, carrier constraint, and workflow drive the decision?" },
+  { id: "KC014", title: "Automatic Hammer", keywords: "automatic hammer autohammer spt energy anvil chain hydraulic stroke bpm symptom", guidance: "Treat the hammer as an integrated SPT energy-delivery system tied to a rig. Confirm configuration and operating conditions, inspect mechanical/hydraulic basics, request video when needed, and escalate unresolved symptoms.", next: "Which rig and hammer setup are involved, what changed, and what does the hammer do now?" },
+  { id: "KC015", title: "Hammer Calibration", keywords: "calibration report certificate lp le n60 energy date due dot schedule compliance", guidance: "Confirm hammer configuration, last calibration/report status, due date or project requirement, rod setup, LP/LE context, location, and timing. MDB supports prospecting, scheduling, training, and troubleshooting—not official report execution.", next: "What is the last confirmed calibration date and what deadline or documentation requirement is driving the call?" },
+];
+
+const workflowTrainingScenarios = {
+  "first-call": {
+    title: "First Customer Call",
+    subtitle: "Find the customer, rig, method, and immediate need through a natural conversation.",
+    opening: "Hey, this is Mike from Atlas. We’re running one of your truck rigs and need the piece that connects the rotary to our hollow-stem augers. Ours is getting pretty beat up.",
+    facts: { company: "Atlas Geotechnical", rig: "Mobile Drill B57", serial: "The tag is dirty; I can get the serial after this call.", method: "HSA with SPT sampling", size: "4-1/4 inch", connection: "2-Key heavy-duty", need: "A replacement drive cap; the current cap is rounded and worn.", quantity: "One now, possibly a spare after fit is confirmed." },
+  },
+  "part-search": {
+    title: "Unknown Part Search",
+    subtitle: "Work from the customer’s description to the right workspace without guessing a part number.",
+    opening: "I need the cutting piece on the bottom of our hollow-stem setup. We’re in hard clay and gravel, and the teeth are about gone. I don’t know what style it is.",
+    facts: { company: "Blue Ridge Drilling", rig: "Mobile Drill B37X", serial: "2025028", method: "HSA drilling", size: "6-5/8 inch", connection: "3-Key", need: "Replacement cutterhead and wear components for hard clay and gravel.", quantity: "One assembly plus common wear parts." },
+  },
+  "quote-run": {
+    title: "Full Quote Run",
+    subtitle: "Qualify a multi-line tooling request before sending anything into a dummy quote.",
+    opening: "Can you quote ten five-foot augers, a drive cap, and whatever center setup we need? It’s for our B57 and we run AWJ inside the augers.",
+    facts: { company: "GeoDynamics Inc.", rig: "Mobile Drill B57", serial: "2025023", method: "HSA with AWJ rod and SPT sampling", size: "6-5/8 inch", connection: "3-Key", need: "Ten 5-foot augers, one drive cap, and a compatible center-plug assembly.", quantity: "10 augers, 1 drive cap, 1 center-plug assembly." },
+  },
+};
 
 const workspaceEntries = [
   ["Customer Profile", "Customer workspace", "customer", "customer client account company"],
@@ -1065,7 +1105,110 @@ function renderCalibrationTrainingWorkspace() {
 }
 
 function renderWorkflowTrainingWorkspace() {
-  elements.overlayBody.innerHTML = `<div class="workbench training-workbench"><div class="training-intro"><span>Practice only</span><h3>Customer Workflow Training</h3><p>Fake prompts can search real demo records and build dummy quotes without changing operational data.</p></div><div class="training-grid"><button type="button" data-training-scenario="first-call"><strong>First Customer Call</strong><span>Identify the customer, rig, and immediate need.</span></button><button type="button" data-training-scenario="part-search"><strong>Unknown Part Search</strong><span>Work from description to a verified result.</span></button><button type="button" data-training-scenario="quote-run"><strong>Full Quote Run</strong><span>Build a dummy quote from the customer request.</span></button></div><section id="trainingStage" class="training-stage"><strong>Select a practice scenario.</strong></section></div>`;
+  ensureWorkflowConversation();
+  const trainingState = state.workflowTraining;
+  const scenario = workflowTrainingScenarios[trainingState.scenarioId];
+  elements.overlayBody.innerHTML = `<div class="workbench training-workbench training-workbench--chat">
+    <div class="training-intro"><span>Practice only</span><h3>Customer Workflow Training</h3><p>Talk through the call naturally. MDB plays the customer and coaches the rep from KC001-KC015 without changing operational data.</p></div>
+    <div class="workflow-training-layout">
+      <aside class="training-scenario-rail"><header><strong>Choose the call</strong><span>Restart anytime</span></header>${Object.entries(workflowTrainingScenarios).map(([id, item]) => `<button type="button" class="${id === trainingState.scenarioId ? "is-active" : ""}" data-workflow-scenario="${id}"><strong>${escapeHTML(item.title)}</strong><span>${escapeHTML(item.subtitle)}</span></button>`).join("")}
+        <section class="kc-coverage"><header><strong>KC coverage</strong><span>${trainingState.matchedKcs.length} used this call</span></header><div>${kcTrainingKnowledge.map((item) => `<button type="button" class="${trainingState.matchedKcs.includes(item.id) ? "is-used" : ""}" data-training-kc="${item.id}" title="${escapeHTML(item.title)}">${item.id.replace("KC", "")}</button>`).join("")}</div></section>
+      </aside>
+      <section class="training-chat-panel">
+        <header class="training-chat-header"><div><span>Active conversation</span><h3>${escapeHTML(scenario.title)}</h3><p>${escapeHTML(scenario.subtitle)}</p></div><button type="button" class="secondary-button" data-training-restart>Restart</button></header>
+        <div id="workflowChatLog" class="training-chat-log" aria-live="polite">${trainingState.messages.map((message) => `<article class="chat-message chat-message--${message.role}"><span>${message.role === "rep" ? "You · Rep" : message.role === "coach" ? `MDB Coach${message.kcs?.length ? ` · ${message.kcs.join(" + ")}` : ""}` : "Practice Customer"}</span><p>${escapeHTML(message.text)}</p></article>`).join("")}</div>
+        <div class="training-quick-prompts"><span>Quick reply</span><button type="button" data-chat-prompt="Which company are you with?">Company</button><button type="button" data-chat-prompt="Which rig model and serial are you running?">Rig & serial</button><button type="button" data-chat-prompt="What drilling method, tooling size, and connection are you running?">Method & tooling</button><button type="button" data-chat-prompt="What exactly is worn, broken, or needed?">Immediate need</button></div>
+        <form id="workflowChatForm" class="training-chat-composer"><label for="workflowChatInput" class="sr-only">Reply as the sales representative</label><textarea id="workflowChatInput" rows="2" placeholder="Reply as the rep, ask the customer a question, or ask MDB to explain a KC topic..."></textarea><button type="submit" class="primary-button">Send</button></form>
+      </section>
+    </div>
+  </div>`;
+  elements.overlayBody.scrollTop = 0;
+  const chatLog = $("#workflowChatLog");
+  if (chatLog) chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+function ensureWorkflowConversation(reset = false) {
+  const trainingState = state.workflowTraining;
+  const scenario = workflowTrainingScenarios[trainingState.scenarioId] || workflowTrainingScenarios["first-call"];
+  if (reset || !trainingState.messages.length) {
+    trainingState.messages = [{ role: "customer", text: scenario.opening }];
+    trainingState.matchedKcs = ["KC001"];
+  }
+}
+
+function tokenMatchesCue(token, cue) {
+  if (token === cue || token.startsWith(cue) || cue.startsWith(token)) return true;
+  return token[0] === cue[0] && token.length >= 4 && cue.length >= 4 && Math.abs(token.length - cue.length) <= 2 && levenshtein(token, cue) <= Math.max(1, Math.floor(cue.length / 4));
+}
+
+function mentionsAny(value, cues) {
+  const tokens = normalize(value).split(" ").filter(Boolean);
+  return cues.some((cue) => tokens.some((token) => tokenMatchesCue(token, cue)));
+}
+
+function findTrainingKcs(value) {
+  const clean = normalize(value);
+  const exactKc = kcTrainingKnowledge.find((item) => clean.includes(normalize(item.id)));
+  if (exactKc) return [exactKc];
+  const ignored = new Set(["which", "what", "where", "when", "why", "how", "are", "you", "your", "the", "and", "with", "from", "this", "that", "running", "need", "please", "tell", "about"]);
+  const tokens = clean.split(" ").filter((token) => token.length >= 3 && !ignored.has(token));
+  const cueBoosts = [
+    [["company", "customer", "business", "source"], ["KC001"]],
+    [["rig", "model", "serial", "machine"], ["KC002", "KC013"]],
+    [["hsa", "hollow", "auger"], ["KC003", "KC009"]],
+    [["rod", "awj", "nwj"], ["KC004"]],
+    [["spoon", "spt", "sampler"], ["KC005"]],
+    [["plug", "pilot"], ["KC006"]],
+    [["cap", "rotary"], ["KC007"]],
+    [["cutter", "cutterhead", "teeth"], ["KC008"]],
+    [["hexcor", "hex"], ["KC010"]],
+    [["air", "mud", "tricone", "swivel"], ["KC011"]],
+    [["coring", "casing", "nq", "hwt"], ["KC012"]],
+    [["hammer", "autohammer", "anvil"], ["KC014"]],
+    [["calibration", "certificate", "n60"], ["KC015"]],
+  ];
+  const scored = kcTrainingKnowledge.map((item) => {
+    const knowledgeTokens = normalize(`${item.id} ${item.title} ${item.keywords}`).split(" ");
+    let score = 0;
+    tokens.forEach((token) => { if (knowledgeTokens.some((candidate) => candidate === token || candidate.startsWith(token) || token.startsWith(candidate))) score += 2; else if (knowledgeTokens.some((candidate) => tokenMatchesCue(token, candidate))) score += 1; });
+    cueBoosts.forEach(([cues, ids]) => { if (ids.includes(item.id) && mentionsAny(value, cues)) score += 3; });
+    return { item, score };
+  }).filter((result) => result.score > 0).sort((a, b) => b.score - a.score);
+  if (!scored.length) return [kcTrainingKnowledge[0]];
+  const best = scored[0].score;
+  return scored.filter((result) => result.score >= best - 1).slice(0, 2).map((result) => result.item);
+}
+
+function customerTrainingReply(value, scenario) {
+  const factCues = [
+    ["company", ["company", "customer", "business", "name"]],
+    ["rig", ["rig", "model", "machine"]],
+    ["serial", ["serial", "tag"]],
+    ["method", ["method", "drilling", "work", "application", "sampling"]],
+    ["size", ["size", "diameter", "inch"]],
+    ["connection", ["connection", "key", "thread", "joint", "hex"]],
+    ["need", ["need", "problem", "issue", "broken", "worn", "wrong", "happening"]],
+    ["quantity", ["quantity", "qty", "many", "amount"]],
+  ];
+  const answers = factCues.filter(([, cues]) => mentionsAny(value, cues)).map(([field]) => scenario.facts[field]).filter(Boolean);
+  if (answers.length) return answers.join(" ");
+  if (mentionsAny(value, ["hello", "hi", "thanks", "thank"])) return "Sure. Tell me what you need from me and I’ll give you what I know.";
+  return "I’m not sure how to answer that yet. Ask me about the company, rig, serial, drilling method, tooling size/connection, quantity, or what is failing.";
+}
+
+function runWorkflowTrainingTurn(value) {
+  const textValue = String(value || "").trim();
+  if (!textValue) return;
+  const trainingState = state.workflowTraining;
+  const scenario = workflowTrainingScenarios[trainingState.scenarioId];
+  const matches = findTrainingKcs(textValue);
+  trainingState.messages.push({ role: "rep", text: textValue });
+  const coachOnly = mentionsAny(textValue, ["teach", "explain", "learn", "coach", "kc001", "kc002", "kc003", "kc004", "kc005", "kc006", "kc007", "kc008", "kc009", "kc010", "kc011", "kc012", "kc013", "kc014", "kc015"]);
+  if (!coachOnly) trainingState.messages.push({ role: "customer", text: customerTrainingReply(textValue, scenario) });
+  trainingState.messages.push({ role: "coach", kcs: matches.map((item) => item.id), text: `${matches.map((item) => `${item.id} ${item.title}`).join(" + ")}: ${matches.map((item) => item.guidance).join(" ")} Next move: ${matches[0].next}` });
+  trainingState.matchedKcs = [...new Set([...trainingState.matchedKcs, ...matches.map((item) => item.id)])];
+  renderWorkflowTrainingWorkspace();
+  $("#workflowChatInput")?.focus({ preventScroll: true });
 }
 
 function renderTrainingScenario(id) {
@@ -1148,6 +1291,19 @@ elements.overlayBody.addEventListener("change", (event) => {
   if (target.matches("[data-rig-stage]")) { rigSalesOpportunities[Number(target.dataset.rigStage)].stage = target.value; renderRigSalesWorkspace(); }
 });
 
+elements.overlayBody.addEventListener("submit", (event) => {
+  if (event.target.id !== "workflowChatForm") return;
+  event.preventDefault();
+  runWorkflowTrainingTurn($("#workflowChatInput")?.value);
+});
+
+elements.overlayBody.addEventListener("keydown", (event) => {
+  if (event.target.id === "workflowChatInput" && event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    runWorkflowTrainingTurn(event.target.value);
+  }
+});
+
 elements.overlayBody.addEventListener("click", (event) => {
   if (event.target.closest("[data-schedule-calibration-workspace]")) { const customer = customers.find((item) => item.id === state.calibrationCustomerId); state.quote.customerId = customer?.id || ""; addQuoteLine("CAL-SERVICE", "Automatic hammer calibration service", 0, "Calibration workspace"); openWorkspace("quotes"); return; }
   if (event.target.closest("[data-demo-certificate]")) { showToast("Calibration certificate opened in demo mode"); return; }
@@ -1175,6 +1331,13 @@ elements.overlayBody.addEventListener("click", (event) => {
   if (logCall) { const customer = customers.find((item) => item.id === logCall.dataset.logCall); const today = new Date().toISOString().slice(0, 10); state.touches[customer.id] = today; customer.interactions.unshift({ type: "Call", date: today, text: "Customer touch logged from Daily Call List", owner: "Current rep" }); safeSave("mdb-demo-touches", state.touches); renderCallListWorkspace(); showToast(`${customer.name} moved out of the 90-day queue`); return; }
   const callProfile = event.target.closest("[data-call-profile]");
   if (callProfile) { closeWorkspace(); openCustomerWorkspace(callProfile.dataset.callProfile); return; }
+  const workflowScenario = event.target.closest("[data-workflow-scenario]");
+  if (workflowScenario) { state.workflowTraining.scenarioId = workflowScenario.dataset.workflowScenario; ensureWorkflowConversation(true); renderWorkflowTrainingWorkspace(); return; }
+  const trainingKc = event.target.closest("[data-training-kc]");
+  if (trainingKc) { const entry = kcTrainingKnowledge.find((item) => item.id === trainingKc.dataset.trainingKc); runWorkflowTrainingTurn(`Explain ${entry.id} ${entry.title}`); return; }
+  const chatPrompt = event.target.closest("[data-chat-prompt]");
+  if (chatPrompt) { runWorkflowTrainingTurn(chatPrompt.dataset.chatPrompt); return; }
+  if (event.target.closest("[data-training-restart]")) { ensureWorkflowConversation(true); renderWorkflowTrainingWorkspace(); return; }
   const trainingScenario = event.target.closest("[data-training-scenario]");
   if (trainingScenario) { renderTrainingScenario(trainingScenario.dataset.trainingScenario); return; }
   if (event.target.closest("[data-complete-training]")) { showToast("Practice completed — no operational records changed"); return; }

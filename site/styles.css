@@ -2699,6 +2699,264 @@ button:disabled {
   padding-left: 24px;
 }
 
+.training-workbench--chat {
+  display: grid;
+  gap: 12px;
+}
+
+.workflow-training-layout {
+  display: grid;
+  grid-template-columns: 285px minmax(0, 1fr);
+  gap: 12px;
+  height: clamp(450px, calc(100vh - var(--banner-height) - 190px), 680px);
+  min-height: 450px;
+}
+
+.training-scenario-rail,
+.training-chat-panel {
+  min-width: 0;
+  overflow: hidden;
+  background: var(--white);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+}
+
+.training-scenario-rail {
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+}
+
+.training-scenario-rail > header,
+.kc-coverage > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 3px 9px;
+}
+
+.training-scenario-rail header span,
+.training-scenario-rail > button span {
+  color: var(--ink-faint);
+  font-size: 0.65rem;
+}
+
+.training-scenario-rail > button {
+  display: block;
+  width: 100%;
+  margin-bottom: 7px;
+  padding: 11px;
+  color: var(--ink);
+  text-align: left;
+  background: #f8fafb;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.training-scenario-rail > button:hover,
+.training-scenario-rail > button.is-active {
+  background: var(--speedway-blue-pale);
+  border-color: var(--speedway-blue);
+  box-shadow: inset 3px 0 0 var(--race-car-red);
+}
+
+.training-scenario-rail > button strong,
+.training-scenario-rail > button span {
+  display: block;
+}
+
+.training-scenario-rail > button span {
+  margin-top: 3px;
+  line-height: 1.35;
+}
+
+.kc-coverage {
+  margin-top: auto;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+}
+
+.kc-coverage > div {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 5px;
+}
+
+.kc-coverage button {
+  min-height: 30px;
+  padding: 0;
+  color: var(--ink-soft);
+  background: #f4f7f9;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 0.64rem;
+  font-weight: 850;
+}
+
+.kc-coverage button:hover,
+.kc-coverage button.is-used {
+  color: var(--white);
+  background: var(--mobile-drill-blue);
+  border-color: var(--mobile-drill-blue);
+}
+
+.training-chat-panel {
+  display: grid;
+  grid-template-rows: auto minmax(270px, 1fr) auto auto;
+}
+
+.training-chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.training-chat-header span {
+  color: var(--mobile-drill-blue);
+  font-size: 0.62rem;
+  font-weight: 850;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.training-chat-header h3,
+.training-chat-header p {
+  margin: 0;
+}
+
+.training-chat-header h3 {
+  margin-top: 2px;
+  font-size: 0.92rem;
+}
+
+.training-chat-header p {
+  margin-top: 2px;
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+}
+
+.training-chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  max-height: none;
+  padding: 16px;
+  overflow-y: auto;
+  background: linear-gradient(180deg, #f7fafc, #eef4f7);
+}
+
+.chat-message {
+  width: min(78%, 780px);
+  padding: 10px 12px;
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: 4px 11px 11px;
+  box-shadow: var(--shadow-small);
+}
+
+.chat-message > span {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--ink-faint);
+  font-size: 0.6rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.chat-message p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.chat-message--rep {
+  align-self: flex-end;
+  color: var(--white);
+  background: var(--mobile-drill-blue);
+  border-color: var(--mobile-drill-blue);
+  border-radius: 11px 4px 11px 11px;
+}
+
+.chat-message--rep > span {
+  color: #bfe8fb;
+}
+
+.chat-message--coach {
+  width: min(92%, 900px);
+  background: var(--warning-pale);
+  border-color: #efdba4;
+  border-left: 4px solid var(--race-car-red);
+}
+
+.chat-message--coach > span {
+  color: var(--warning);
+}
+
+.training-quick-prompts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  overflow-x: auto;
+  border-top: 1px solid var(--line);
+}
+
+.training-quick-prompts > span {
+  flex: 0 0 auto;
+  color: var(--ink-faint);
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.training-quick-prompts button {
+  flex: 0 0 auto;
+  min-height: 29px;
+  padding: 0 9px;
+  color: var(--mobile-drill-blue);
+  background: var(--speedway-blue-pale);
+  border: 1px solid #b8ddf0;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 750;
+}
+
+.training-chat-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 9px;
+  padding: 11px 12px;
+  background: var(--white);
+  border-top: 1px solid var(--line);
+}
+
+.training-chat-composer textarea {
+  width: 100%;
+  min-height: 50px;
+  max-height: 130px;
+  resize: vertical;
+  padding: 10px 11px;
+  color: var(--ink);
+  background: #fbfdfe;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+}
+
+.training-chat-composer textarea:focus {
+  border-color: var(--speedway-blue);
+  box-shadow: 0 0 0 3px rgba(49, 169, 224, 0.2);
+  outline: 0;
+}
+
+.training-chat-composer button {
+  align-self: stretch;
+}
+
 @media (max-width: 1450px) {
   .prospect-rules {
     grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
@@ -2719,6 +2977,7 @@ button:disabled {
   .workspace-nav-group > strong { font-size: 0.57rem; }
   .prospect-fields { grid-template-columns: 1fr 1fr; }
   .prospect-rules { grid-template-columns: 1fr 1fr; }
+  .workflow-training-layout { grid-template-columns: 235px minmax(0, 1fr); }
 }
 
 @media (max-width: 850px) {
@@ -2743,6 +3002,11 @@ button:disabled {
   .workspace-overlay--customer-tooling { right: 12px; bottom: 12px; left: 12px; }
   .metric-grid { grid-template-columns: 1fr 1fr; }
   .prospect-grid { grid-template-columns: 1fr; }
+  .workflow-training-layout { grid-template-columns: 1fr; }
+  .training-scenario-rail { display: grid; grid-template-columns: repeat(3, minmax(190px, 1fr)); gap: 7px; overflow-x: auto; }
+  .training-scenario-rail > header,
+  .kc-coverage { display: none; }
+  .training-scenario-rail > button { margin: 0; }
 }
 
 @media (max-width: 640px) {
