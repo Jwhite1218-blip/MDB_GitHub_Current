@@ -5,224 +5,152 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="description"
-      content="Mobile Drill Brain internal demo for progressive expert navigation."
+      content="Mobile Drill Brain operational workspace demo."
     >
-    <title>Mobile Drill Brain | Progressive Entry Demo</title>
+    <title>Mobile Drill Brain</title>
     <link rel="stylesheet" href="styles.css">
     <script src="app.js" defer></script>
   </head>
 
   <body>
-    <a class="skip-link" href="#main-content">Skip to the MDB entry</a>
+    <a class="skip-link" href="#mainContent">Skip to workspace</a>
 
-    <header class="app-header">
-      <a class="brand" href="#main-content" aria-label="Mobile Drill Brain home">
+    <header class="app-banner">
+      <button id="homeButton" class="brand-button" type="button" aria-label="MDB home">
         <img
-          class="brand-logo"
           src="assets/mobile-drill-logo-transparent.png"
           width="500"
           height="119"
           alt="Mobile Drill International"
         >
-      </a>
-
-      <div class="header-status" aria-label="Application status">
-        <span class="status-dot" aria-hidden="true"></span>
-        Mobile Drill Brain · Internal demo
-      </div>
+      </button>
+      <span class="demo-pill">MDB Demo</span>
     </header>
 
-    <main id="main-content" class="app-shell">
-      <section class="entry-section" aria-labelledby="entry-title">
-        <div class="entry-copy">
-          <span class="section-label">Universal entry</span>
-          <h1 id="entry-title">Start with what you know.</h1>
-          <p>
-            Enter a part number, tooling item, rig serial, assembly, model,
-            customer need, or machine problem. MDB will interpret the request,
-            route it, and ask only the next useful question.
-          </p>
-        </div>
-
-        <form id="universalSearch" class="universal-search" novalidate>
-          <label class="sr-only" for="searchInput">What do you know?</label>
-          <div class="search-control">
-            <span class="search-icon" aria-hidden="true"></span>
+    <main id="mainContent" class="application">
+      <section id="homeView" class="home-view" aria-label="MDB home">
+        <div class="home-search-wrap">
+          <form id="globalSearchForm" class="global-search" novalidate>
+            <label class="sr-only" for="globalSearchInput">Search MDB</label>
+            <span class="search-mark" aria-hidden="true"></span>
             <input
-              id="searchInput"
-              name="query"
+              id="globalSearchInput"
               type="search"
               autocomplete="off"
               spellcheck="false"
-              aria-describedby="searchHelp searchError"
-              placeholder="Try: drive cap, B57 rotary, 217962, Moyno 3L6..."
+              placeholder="Search customer, tooling, quote, inventory, rig or serial..."
+              aria-controls="globalSearchResults"
+              aria-expanded="false"
             >
-            <button type="submit">Route request</button>
-          </div>
-          <p id="searchHelp" class="search-help">
-            Search finds possible matches. Authority and compatibility decide
-            what MDB can safely do next.
-          </p>
-          <p id="searchError" class="search-error" role="alert"></p>
-        </form>
-
-        <div class="examples" aria-label="Example searches">
-          <span>Try an example</span>
-          <button type="button" class="example-query" data-query="drive cap">
-            drive cap
-          </button>
-          <button type="button" class="example-query" data-query="split spoon">
-            split spoon
-          </button>
-          <button type="button" class="example-query" data-query="B57 rotary">
-            B57 rotary
-          </button>
-          <button type="button" class="example-query" data-query="Moyno 3L6">
-            Moyno 3L6
-          </button>
-          <button
-            type="button"
-            class="example-query"
-            data-query="rotary won't turn"
-          >
-            rotary won't turn
-          </button>
+            <button type="submit">Search</button>
+          </form>
+          <div id="globalSearchResults" class="search-results" role="listbox" hidden></div>
         </div>
+
+        <nav class="quick-nav" aria-label="Primary workspaces">
+          <button type="button" data-open="customer">
+            <span class="quick-icon quick-icon--customer" aria-hidden="true"></span>
+            <span>Customer</span>
+          </button>
+          <button type="button" data-open="tooling">
+            <span class="quick-icon quick-icon--tooling" aria-hidden="true"></span>
+            <span>Tooling</span>
+          </button>
+          <button type="button" data-open="quotes">
+            <span class="quick-icon quick-icon--quotes" aria-hidden="true"></span>
+            <span>Quotes</span>
+          </button>
+          <button type="button" data-open="inventory">
+            <span class="quick-icon quick-icon--inventory" aria-hidden="true"></span>
+            <span>Inventory</span>
+          </button>
+          <button type="button" data-open="bom">
+            <span class="quick-icon quick-icon--bom" aria-hidden="true"></span>
+            <span>Rig / BOM</span>
+          </button>
+        </nav>
       </section>
 
-      <section
-        id="reasoningPanel"
-        class="reasoning-panel"
-        aria-labelledby="reasoningTitle"
-        aria-live="polite"
-        hidden
-      >
-        <div class="panel-header">
-          <div>
-            <span class="section-label section-label--light">MDB reasoning path</span>
-            <h2 id="reasoningTitle">Understanding your request</h2>
-          </div>
-          <span id="routeBadge" class="route-badge">Routing</span>
-        </div>
+      <section id="customerView" class="customer-view" aria-label="Customer Profile workspace" hidden>
+        <header class="workspace-toolbar">
+          <button id="customerBackButton" class="icon-button" type="button" aria-label="Back to MDB home">
+            <span aria-hidden="true">&#8592;</span>
+          </button>
+          <h1>Customer Profile</h1>
 
-        <div id="reasoningBody" class="reasoning-body"></div>
-
-        <div id="questionStage" class="question-stage" hidden>
-          <div class="question-heading">
-            <span id="questionCount" class="question-count"></span>
-            <h3 id="questionText"></h3>
-            <p id="questionHelp"></p>
+          <div class="customer-search-wrap">
+            <form id="customerSearchForm" class="compact-search" novalidate>
+              <label class="sr-only" for="customerSearchInput">Search customers</label>
+              <span class="search-mark" aria-hidden="true"></span>
+              <input
+                id="customerSearchInput"
+                type="search"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="Search customers..."
+                aria-controls="customerSearchResults"
+                aria-expanded="false"
+              >
+            </form>
+            <div id="customerSearchResults" class="search-results search-results--compact" role="listbox" hidden></div>
           </div>
-          <div id="answerOptions" class="answer-options"></div>
-        </div>
 
-        <div id="resultStage" class="result-stage" hidden>
-          <div id="resultBody"></div>
-          <div class="result-actions">
-            <button id="refineButton" class="secondary-button" type="button">
-              Refine this request
-            </button>
-            <button id="newSearchButton" class="text-button" type="button">
-              Start a new entry
-            </button>
+          <div class="workspace-actions">
+            <button type="button" data-workspace="tooling">Tooling</button>
+            <button type="button" data-workspace="quotes">Quotes</button>
+            <div class="menu-wrap">
+              <button
+                id="calibrationButton"
+                type="button"
+                aria-expanded="false"
+                aria-controls="calibrationMenu"
+              >
+                Calibration <span aria-hidden="true">&#9662;</span>
+              </button>
+              <div id="calibrationMenu" class="calibration-menu" hidden></div>
+            </div>
           </div>
+        </header>
+
+        <div class="customer-workspace">
+          <aside class="customer-directory" aria-label="All customers">
+            <div class="directory-heading">
+              <strong>All Customers</strong>
+              <span>A-Z</span>
+            </div>
+            <label class="directory-filter">
+              <span class="sr-only">Filter customer list</span>
+              <span class="search-mark" aria-hidden="true"></span>
+              <input id="directoryFilter" type="search" autocomplete="off" placeholder="Filter list...">
+            </label>
+            <div id="customerList" class="customer-list" role="list"></div>
+          </aside>
+
+          <section id="customerProfile" class="customer-profile" aria-live="polite">
+            <div class="profile-empty">
+              <span class="empty-mark" aria-hidden="true"></span>
+              <strong>Select a customer</strong>
+            </div>
+          </section>
         </div>
       </section>
-
-      <section class="doctrine-strip" aria-label="MDB search doctrine">
-        <div>
-          <span class="doctrine-number">01</span>
-          <strong>Interpret</strong>
-          <span>Detect intent without forcing a menu choice.</span>
-        </div>
-        <div>
-          <span class="doctrine-number">02</span>
-          <strong>Protect</strong>
-          <span>Apply source, compatibility, and safety gates.</span>
-        </div>
-        <div>
-          <span class="doctrine-number">03</span>
-          <strong>Narrow</strong>
-          <span>Ask one useful question, then reveal the next.</span>
-        </div>
-        <div>
-          <span class="doctrine-number">04</span>
-          <strong>Act</strong>
-          <span>Return a labeled next step, never a silent guess.</span>
-        </div>
-      </section>
-
-      <section class="workspace-summary" aria-labelledby="workspace-title">
-        <div class="workspace-heading">
-          <div>
-            <span class="section-label">Expert navigation areas</span>
-            <h2 id="workspace-title">The workspaces sit behind the entry.</h2>
-          </div>
-          <p>
-            They are routing destinations, not a menu the user has to understand
-            before asking for help.
-          </p>
-        </div>
-
-        <div class="workspace-grid">
-          <article class="workspace-card workspace-card--tooling">
-            <span class="workspace-number">004</span>
-            <h3>Tooling</h3>
-            <p>Family, dimensions, connection, CTS rules, and compatibility.</p>
-            <span class="workspace-rule">CTS + WS004 control execution</span>
-          </article>
-
-          <article class="workspace-card workspace-card--parts">
-            <span class="workspace-number">002/003</span>
-            <h3>Rig Parts</h3>
-            <p>Serial-specific BOM navigation, assemblies, and Where Used.</p>
-            <span class="workspace-rule">Serial before quote-ready part</span>
-          </article>
-
-          <article class="workspace-card workspace-card--rigs">
-            <span class="workspace-number">005</span>
-            <h3>Rig Sales</h3>
-            <p>Model reference, controlled comparisons, and guided selection.</p>
-            <span class="workspace-rule">Reference or guided-selling mode</span>
-          </article>
-
-          <article class="workspace-card workspace-card--trouble">
-            <span class="workspace-number">007</span>
-            <h3>Troubleshooting</h3>
-            <p>Symptom-first safety, system isolation, and escalation.</p>
-            <span class="workspace-rule">No symptom-to-part shortcut</span>
-          </article>
-
-          <article class="workspace-card workspace-card--calibration">
-            <span class="workspace-number">006</span>
-            <h3>Calibration</h3>
-            <p>SPT service, training, scheduling, and data-quality support.</p>
-            <span class="workspace-rule">Support, not final report authority</span>
-          </article>
-
-          <article class="workspace-card workspace-card--knowledge">
-            <span class="workspace-number">008</span>
-            <h3>Reference &amp; Training</h3>
-            <p>Concept explanations, call preparation, practice, and routing.</p>
-            <span class="workspace-rule">Teach first; route when intent changes</span>
-          </article>
-        </div>
-      </section>
-
-      <aside class="demo-boundary" aria-label="Demo data boundary">
-        <span class="boundary-icon" aria-hidden="true">i</span>
-        <p>
-          <strong>Demo boundary:</strong> this front end uses safe, built-in
-          scenarios. It does not expose raw documents, spreadsheets, pricing,
-          inventory, or live serial-BOM records.
-        </p>
-      </aside>
     </main>
 
-    <footer class="app-footer">
-      <span>Mobile Drill Brain</span>
-      <span>Current working demo</span>
-      <span>Search result is not a recommendation</span>
-    </footer>
+    <section id="workspaceOverlay" class="workspace-overlay" aria-label="Workspace" hidden>
+      <header class="overlay-toolbar">
+        <button id="overlayBackButton" class="icon-button" type="button" aria-label="Close workspace">
+          <span aria-hidden="true">&#8592;</span>
+        </button>
+        <div>
+          <span id="overlayEyebrow"></span>
+          <h2 id="overlayTitle"></h2>
+        </div>
+        <button id="overlayCloseButton" class="close-button" type="button" aria-label="Close workspace">&#215;</button>
+      </header>
+      <div id="overlayBody" class="overlay-body"></div>
+    </section>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   </body>
 </html>
+
