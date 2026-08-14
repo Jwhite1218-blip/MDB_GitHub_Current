@@ -1,817 +1,992 @@
 "use strict";
 
-const searchForm = document.querySelector("#universalSearch");
-const searchInput = document.querySelector("#searchInput");
-const searchError = document.querySelector("#searchError");
-const reasoningPanel = document.querySelector("#reasoningPanel");
-const reasoningTitle = document.querySelector("#reasoningTitle");
-const reasoningBody = document.querySelector("#reasoningBody");
-const routeBadge = document.querySelector("#routeBadge");
-const questionStage = document.querySelector("#questionStage");
-const questionCount = document.querySelector("#questionCount");
-const questionText = document.querySelector("#questionText");
-const questionHelp = document.querySelector("#questionHelp");
-const answerOptions = document.querySelector("#answerOptions");
-const resultStage = document.querySelector("#resultStage");
-const resultBody = document.querySelector("#resultBody");
-const refineButton = document.querySelector("#refineButton");
-const newSearchButton = document.querySelector("#newSearchButton");
+const homeView = document.querySelector("#homeView");
+const customerView = document.querySelector("#customerView");
+const homeButton = document.querySelector("#homeButton");
+const customerBackButton = document.querySelector("#customerBackButton");
+const globalSearchForm = document.querySelector("#globalSearchForm");
+const globalSearchInput = document.querySelector("#globalSearchInput");
+const globalSearchResults = document.querySelector("#globalSearchResults");
+const customerSearchForm = document.querySelector("#customerSearchForm");
+const customerSearchInput = document.querySelector("#customerSearchInput");
+const customerSearchResults = document.querySelector("#customerSearchResults");
+const directoryFilter = document.querySelector("#directoryFilter");
+const customerList = document.querySelector("#customerList");
+const customerProfile = document.querySelector("#customerProfile");
+const calibrationButton = document.querySelector("#calibrationButton");
+const calibrationMenu = document.querySelector("#calibrationMenu");
+const workspaceOverlay = document.querySelector("#workspaceOverlay");
+const overlayBackButton = document.querySelector("#overlayBackButton");
+const overlayCloseButton = document.querySelector("#overlayCloseButton");
+const overlayEyebrow = document.querySelector("#overlayEyebrow");
+const overlayTitle = document.querySelector("#overlayTitle");
+const overlayBody = document.querySelector("#overlayBody");
+const toast = document.querySelector("#toast");
 
 const state = {
-  query: "",
-  route: null,
-  questions: [],
-  questionIndex: 0,
-  answers: [],
-  stopReason: "",
+  selectedCustomerId: null,
+  activeView: "home",
+  activeWorkspace: null,
+  globalResults: [],
+  customerResults: [],
+  toastTimer: null,
+  quote: null,
 };
 
-const routeSelection = {
-  tooling: "tooling",
-  parts: "parts",
-  rigs: "rigs",
-  trouble: "troubleshooting",
-  calibration: "calibration",
-  knowledge: "knowledge",
-};
+const purchaseTemplates = [
+  ["2026-07-29", "Tooling", "3.25 in AW casing", 100, 4250],
+  ["2026-06-17", "Tooling", "AWJ casing shoe", 10, 850],
+  ["2026-04-24", "Parts", "Hydraulic hose assembly", 2, 320],
+  ["2026-03-10", "Tooling", "SPT hammer assembly", 1, 1250],
+  ["2026-01-28", "Tooling", "3.25 in AW rod", 50, 2150],
+  ["2025-11-12", "Parts", "Rotary seal kit", 2, 476],
+  ["2025-09-03", "Tooling", "Split spoon shoe", 12, 936],
+  ["2025-05-19", "Service", "SPT calibration service", 1, 1450],
+];
 
-const routes = {
-  tooling: {
-    id: "tooling",
-    workspace: "Tooling 004",
-    title: "Tooling intent detected",
-    intent: "Identify or configure a tooling item",
-    explanation:
-      "The wording matches a controlled tooling family, component, or selection path.",
-    guardrailTitle: "CTS and WS004 must agree",
-    guardrail:
-      "A catalog hit is only a possible match until required variables and compatibility are checked.",
-    questions: toolingQuestions,
-    result: toolingResult,
-  },
-  parts: {
-    id: "parts",
-    workspace: "Rig Parts 002/003",
-    title: "Rig Parts intent detected",
-    intent: "Identify a part inside a rig or assembly context",
-    explanation:
-      "The entry looks like a part number, serial, assembly, or rig-specific component.",
-    guardrailTitle: "Serial before quote-ready part",
-    guardrail:
-      "A model-only or description-only match cannot be labeled Serial BOM Verified.",
-    questions: () => [
-      {
-        id: "serial-context",
-        prompt: "What rig context is available?",
-        help: "This decides whether MDB can enter a controlled BOM path or must return a proxy.",
-        options: [
-          ["I have the rig serial", "serial"],
-          ["I know the model only", "model"],
-          ["I only have the part or description", "part-only"],
-          ["I am not sure", "unknown"],
-        ],
-      },
-      {
-        id: "parts-goal",
-        prompt: "What do you need from the part path?",
-        help: "Related BOM branches stay collapsed until they are useful.",
-        options: [
-          ["Confirm this exact item", "exact"],
-          ["Show the assembly branch", "assembly"],
-          ["Find where it is used", "where-used"],
-          ["Find a replacement path", "replacement"],
-        ],
-      },
-    ],
-    result: partsResult,
-  },
-  rigs: {
-    id: "rigs",
-    workspace: "Rig Sales 005",
-    title: "Rig Sales intent detected",
-    intent: "Look up, compare, or select a rig",
-    explanation:
-      "The entry names a rig model, specification, or customer application.",
-    guardrailTitle: "Reference and selection are different modes",
-    guardrail:
-      "A model fact can use Reference Mode; a customer recommendation needs Guided Selling context.",
-    questions: () => [
-      {
-        id: "rig-mode",
-        prompt: "What are you trying to do with the rig information?",
-        help: "MDB will keep a simple model lookup separate from a customer-fit recommendation.",
-        options: [
-          ["Look up model specs", "reference"],
-          ["Compare two models", "compare"],
-          ["Select a rig for a customer need", "guided"],
-          ["Work from a specific serial", "serial"],
-        ],
-      },
-      {
-        id: "rig-context",
-        prompt: "Which context can lead the next step?",
-        help: "Application details matter when the request moves beyond reference information.",
-        options: [
-          ["Customer application and depth", "application"],
-          ["Model names only", "models"],
-          ["Serial and build context", "serial-build"],
-          ["I need help gathering details", "gather"],
-        ],
-      },
-    ],
-    result: rigsResult,
-  },
-  troubleshooting: {
-    id: "troubleshooting",
-    workspace: "Troubleshooting 007",
-    title: "Symptom intent detected",
-    intent: "Isolate a machine problem before searching for parts",
-    explanation:
-      "The entry describes behavior or failure, so MDB must not jump directly to a replacement item.",
-    guardrailTitle: "Safety and system isolation first",
-    guardrail:
-      "Troubleshooting starts with a safe machine state and routes to escalation when risk or uncertainty is too high.",
-    questions: () => [
-      {
-        id: "safe-state",
-        prompt: "Is the machine stopped and safe to inspect?",
-        help: "If the answer is no or uncertain, MDB stops the workflow instead of continuing diagnosis.",
-        options: [
-          ["Yes - safe to inspect", "safe"],
-          ["No - it is still operating", "unsafe"],
-          ["I am not sure", "uncertain"],
-        ],
-        stopValues: ["unsafe", "uncertain"],
-      },
-      {
-        id: "system",
-        prompt: "Which system best matches the symptom?",
-        help: "This narrows the handoff without pretending the symptom proves a failed part.",
-        options: [
-          ["Rotary or hydraulic drive", "rotary"],
-          ["Feed, pullback, or breakout", "feed"],
-          ["Water pump or circulation", "water"],
-          ["Hammer or calibration system", "hammer"],
-          ["I cannot isolate the system", "unknown"],
-        ],
-      },
-    ],
-    result: troubleshootingResult,
-  },
-  calibration: {
-    id: "calibration",
-    workspace: "Calibration 006",
-    title: "Calibration intent detected",
-    intent: "Route an SPT calibration service, training, or data-quality need",
-    explanation:
-      "The entry matches calibration service, hammer-energy, scheduling, or technician-support language.",
-    guardrailTitle: "Support is not final report authority",
-    guardrail:
-      "MDB can prepare, train, schedule, and troubleshoot data quality without claiming final external certification authority.",
-    questions: () => [
-      {
-        id: "calibration-goal",
-        prompt: "Which calibration outcome do you need?",
-        help: "The same entry may route to scheduling, training, or data-quality support.",
-        options: [
-          ["Cost, due date, or scheduling", "schedule"],
-          ["Technician training or workflow", "training"],
-          ["Low energy or failed data", "data"],
-          ["Report or customer communication", "report"],
-        ],
-      },
-      {
-        id: "hammer-context",
-        prompt: "What hammer context is known?",
-        help: "MDB preserves what is known and labels missing configuration instead of guessing.",
-        options: [
-          ["LP configuration", "lp"],
-          ["LE configuration", "le"],
-          ["Another known configuration", "other"],
-          ["Configuration is not confirmed", "unknown"],
-        ],
-      },
-    ],
-    result: calibrationResult,
-  },
-  knowledge: {
-    id: "knowledge",
-    workspace: "Reference & Training 008",
-    title: "Reference intent detected",
-    intent: "Explain a concept or prepare the user for an action",
-    explanation:
-      "The wording asks for understanding, training, practice, or call preparation.",
-    guardrailTitle: "Training examples do not create authority",
-    guardrail:
-      "When the intent becomes quote, part, rig selection, calibration, or troubleshooting, MDB routes to that controlled workspace.",
-    questions: () => [
-      {
-        id: "learning-mode",
-        prompt: "How should MDB help you use this information?",
-        help: "Reference stays lightweight unless the request changes into an action workflow.",
-        options: [
-          ["Explain the concept", "explain"],
-          ["Prepare me for a customer call", "call-prep"],
-          ["Practice with a scenario or quiz", "practice"],
-          ["I actually need to take action", "action"],
-        ],
-      },
-    ],
-    result: knowledgeResult,
-  },
-  customer: {
-    id: "customer",
-    workspace: "Customer Context 001",
-    title: "Customer context detected",
-    intent: "Find a customer, fleet, relationship, or purchase-history starting point",
-    explanation:
-      "The entry points to customer identity or relationship context rather than a technical item alone.",
-    guardrailTitle: "Preserve system authority",
-    guardrail:
-      "GP owns transactional truth, Salesforce owns relationship and pipeline truth, and MDB owns operational context and routing.",
-    questions: () => [
-      {
-        id: "customer-goal",
-        prompt: "What should the customer context support?",
-        help: "Customer history can guide the next question but cannot prove current tooling or rig configuration.",
-        options: [
-          ["Find customer or fleet details", "profile"],
-          ["Review purchase history", "history"],
-          ["Prepare a quote conversation", "quote"],
-          ["Build a call or prospecting plan", "prospecting"],
-        ],
-      },
-    ],
-    result: customerResult,
-  },
-  discovery: {
-    id: "discovery",
-    workspace: "Intent check",
-    title: "More than one route is possible",
-    intent: "Clarify the kind of help behind the entry",
-    explanation:
-      "The wording is intentionally preserved, but it does not yet identify one controlled workspace.",
-    guardrailTitle: "Ask before assuming",
-    guardrail:
-      "MDB asks one routing question instead of silently converting ambiguous language into a part or recommendation.",
-    questions: () => [
-      {
-        id: "route-choice",
-        prompt: "Which statement is closest to what you need?",
-        help: "Choose the intent, not the department name. MDB will take it from there.",
-        options: [
-          ["Identify or configure tooling", "tooling"],
-          ["Find a rig or serial-specific part", "parts"],
-          ["Look up or select a rig", "rigs"],
-          ["Work through a machine problem", "trouble"],
-          ["Handle calibration", "calibration"],
-          ["Explain or train me", "knowledge"],
-        ],
-        reroute: true,
-      },
-    ],
-    result: () => null,
-  },
-};
+const interactionTemplates = [
+  ["Call", "2026-08-11", "Discussed rig delivery and operator training", "M. Sales"],
+  ["Email", "2026-08-04", "Sent follow-up on tooling availability", "J. Tech"],
+  ["Quote", "2026-07-22", "Quote prepared for casing and shoes", "S. Rep"],
+  ["Note", "2026-07-09", "On-site demo of new SPT system", "J. Tech"],
+  ["Call", "2026-06-28", "Follow-up on maintenance schedule", "M. Sales"],
+  ["Email", "2026-06-14", "Serial confirmation received", "S. Rep"],
+];
 
-function toolingQuestions(query) {
-  const normalized = query.toLowerCase();
+const atlasRigs = [
+  { model: "Mobile B57", serial: "B57-12145", year: 2021, status: "Active" },
+  { model: "Mobile B37X", serial: "B37X-11876", year: 2020, status: "Active" },
+  { model: "Mobile B53", serial: "B53-11001", year: 2019, status: "Active" },
+];
 
-  if (normalized.includes("drive cap")) {
-    return [
-      {
-        id: "tooling-family",
-        prompt: "Which tooling family is the drive cap for?",
-        help: "Drive-cap wording alone does not identify the required family, size, or connection.",
-        options: [
-          ["HSA", "hsa"],
-          ["HEX-COR or STD Duty", "hex-cor"],
-          ["Another tooling family", "other"],
-          ["I am not sure", "unknown"],
-        ],
-      },
-      {
-        id: "connection-detail",
-        prompt: "What connection detail can be confirmed?",
-        help: "MDB keeps the result at needs-verification until the required CTS variables are known.",
-        options: [
-          ["Family, size, and connection are known", "complete"],
-          ["I know the family and size", "family-size"],
-          ["I have an existing part number", "existing-pn"],
-          ["The connection still needs inspection", "inspect"],
-        ],
-      },
-    ];
-  }
+const customerNames = [
+  "Advanced Foundation Testing",
+  "Allied Engineering Group",
+  "Alpha Testing Services",
+  "American Drilling Corp",
+  "Apex Geotech Solutions",
+  "Atlas Geotechnical LLC",
+  "Baker Environmental",
+  "Blue Ridge Drilling",
+  "Cascade Geotechnical",
+  "CME Associates",
+  "Delta Foundation Services",
+  "EarthTech Drilling",
+  "GeoDynamics Inc.",
+  "GeoStrata Services",
+  "Ground Solutions Group",
+  "Horizon Engineering",
+  "Metro Soil Services",
+  "Premier Drilling Co.",
+  "ProGeo Testing",
+  "Summit Geotech",
+  "TerraFirm Solutions",
+  "United Soil Exploration",
+  "Vertex Geoscience",
+];
 
-  if (normalized.includes("split spoon")) {
-    return [
-      {
-        id: "split-spoon-goal",
-        prompt: "What are you trying to identify?",
-        help: "MDB keeps the complete assembly, shoe, and repair paths separate.",
-        options: [
-          ["Complete split-spoon assembly", "complete"],
-          ["Shoe or repair item", "shoe"],
-          ["Compatibility or replacement", "replacement"],
-          ["I am not sure", "unknown"],
-        ],
-      },
-      {
-        id: "spoon-variables",
-        prompt: "Are size and shoe style confirmed?",
-        help: "Shoe style is a controlled selection variable; MDB will not silently infer it.",
-        options: [
-          ["Yes - both are confirmed", "confirmed"],
-          ["Size is known; shoe style is not", "size-only"],
-          ["I have an existing part number", "existing-pn"],
-          ["Neither is confirmed", "unknown"],
-        ],
-      },
-    ];
-  }
-
-  if (normalized.includes("moyno") || /\b\d+l\d+\b/i.test(query)) {
-    return [
-      {
-        id: "moyno-scope",
-        prompt: "Are you identifying the pump or one component?",
-        help: "Moyno requests route by component and model rather than a loose keyword match.",
-        options: [
-          ["Complete pump", "pump"],
-          ["Pump component", "component"],
-          ["Replacement by model marking", "model"],
-          ["I am not sure", "unknown"],
-        ],
-      },
-      {
-        id: "moyno-marking",
-        prompt: "What model evidence is available?",
-        help: "MDB preserves the marking as evidence and does not promote it to a compatible replacement by itself.",
-        options: [
-          ["The model marking is readable", "readable"],
-          ["I have the old part number", "old-pn"],
-          ["I have photos or dimensions", "photos"],
-          ["No reliable marking is available", "unknown"],
-        ],
-      },
-    ];
-  }
-
-  return [
-    {
-      id: "tooling-goal",
-      prompt: "What are you trying to do with this tooling item?",
-      help: "The answer decides whether MDB should identify, configure, or replace it.",
-      options: [
-        ["Identify an exact item", "identify"],
-        ["Build a compatible assembly", "configure"],
-        ["Replace existing tooling", "replace"],
-        ["I need help narrowing it", "unknown"],
-      ],
-    },
-    {
-      id: "tooling-evidence",
-      prompt: "Which detail can anchor the search?",
-      help: "MDB uses the strongest available detail and labels anything still missing.",
-      options: [
-        ["Family and size", "family-size"],
-        ["Connection", "connection"],
-        ["Existing part number", "existing-pn"],
-        ["Customer-owned tooling only", "history"],
-      ],
-    },
-  ];
+function slugify(value) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
-function detectRoute(query) {
-  const value = query.toLowerCase();
+function buildCustomer(name, index) {
+  const id = slugify(name);
+  const shortName = name.split(/\s+/)[0].toLowerCase();
+  const hasRig = index % 4 !== 0;
+  const activeRigs = hasRig
+    ? [
+        {
+          model: index % 2 ? "Mobile B57" : "Mobile B37X",
+          serial: `${index % 2 ? "B57" : "B37X"}-${String(10420 + index * 37)}`,
+          year: 2016 + (index % 9),
+          status: index % 7 === 0 ? "Inactive" : "Active",
+        },
+      ]
+    : [];
 
-  if (/\b(calibrat(?:e|ed|es|ing|ion)?|spt|hammer energy|energy ratio|lp hammer|le hammer)\b/.test(value)) {
-    return routes.calibration;
-  }
-
-  if (
-    /(won't|will not|doesn't|does not|not turn|not retract|losing pressure|no pressure|leak|stuck|slipping|failed|failure|broken|overheat|problem|won't cycle)/.test(
-      value,
-    )
-  ) {
-    return routes.troubleshooting;
-  }
-
-  if (
-    /\b(serial|bom|assembly|where used|part number|\bpn\b)\b/.test(value) ||
-    /^\d{5,}$/.test(value.trim())
-  ) {
-    return routes.parts;
-  }
-
-  if (/\b(b57|b37x|under[- ]?cdl|rig model|rig spec|compare rigs|need a rig)\b/.test(value)) {
-    return routes.rigs;
-  }
-
-  if (
-    /\b(drive cap|split spoon|auger|hsa|hex[- ]?cor|cutterhead|center rod|center plug|drill rod|moyno|tooling)\b/.test(
-      value,
-    ) || /\b\d+l\d+\b/i.test(query)
-  ) {
-    return routes.tooling;
-  }
-
-  if (/^(what|why|how|explain|teach|train|practice|quiz)\b/.test(value)) {
-    return routes.knowledge;
-  }
-
-  if (/\b(customer|contact|gp code|fleet|purchase history|prospect)\b/.test(value)) {
-    return routes.customer;
-  }
-
-  return routes.discovery;
+  return {
+    id,
+    name,
+    contact: `Demo Contact ${index + 1}`,
+    title: index % 3 === 0 ? "Operations Manager" : "Drilling Manager",
+    email: `contact@${shortName}.example.invalid`,
+    phone: `(317) 555-${String(1100 + index).padStart(4, "0")}`,
+    address: `${120 + index * 9} Field Service Rd, Indianapolis, IN 46200`,
+    website: `${shortName}.example.invalid`,
+    customerSince: String(2010 + (index % 13)),
+    creditTerms: index % 5 === 0 ? "Prepay" : "Net 30",
+    status: index % 11 === 0 ? "Inactive" : "Active",
+    rigs: activeRigs,
+    purchases: purchaseTemplates.map((purchase, purchaseIndex) => ({
+      date: purchase[0],
+      type: purchase[1],
+      description: purchase[2],
+      quantity: Math.max(1, purchase[3] - (index % 4) * (purchaseIndex + 1)),
+      amount: purchase[4] + index * 17,
+    })),
+    tooling: {
+      categories: [
+        ["Casing", 43],
+        ["Sampling", 28],
+        ["SPT", 14],
+        ["Drill Rods", 9],
+        ["Other", 6],
+      ],
+      mostUsed: ["3.25 in AW casing", "SPT auto hammer", "AWJ casing shoe", "3.25 in AW rod", "Split spoon sampler"],
+    },
+    interactions: interactionTemplates.map((item, interactionIndex) => ({
+      type: item[0],
+      date: item[1],
+      text: item[2],
+      owner: interactionIndex % 2 ? "J. Tech" : item[3],
+    })),
+    calibrations: [
+      { date: "2026-04-18", service: "Automatic hammer", result: "Complete" },
+      { date: "2025-04-22", service: "Automatic hammer", result: "Complete" },
+      { date: "2024-05-03", service: "SPT system", result: "Complete" },
+    ],
+  };
 }
 
-function startSearch(query) {
-  state.query = query;
-  state.route = detectRoute(query);
-  state.questions = state.route.questions(query);
-  state.questionIndex = 0;
-  state.answers = [];
-  state.stopReason = "";
+const customers = customerNames.map(buildCustomer);
+const atlasCustomer = customers.find((customer) => customer.id === "atlas-geotechnical-llc");
 
-  searchError.textContent = "";
-  reasoningPanel.hidden = false;
-  resultStage.hidden = true;
-  renderReasoning();
-  renderQuestion();
+Object.assign(atlasCustomer, {
+  contact: "Demo Operations Contact",
+  title: "Operations Manager",
+  email: "operations@atlas.example.invalid",
+  phone: "(317) 555-0142",
+  address: "5820 W 73rd St, Indianapolis, IN 46278",
+  website: "atlas.example.invalid",
+  customerSince: "2019",
+  creditTerms: "Net 30",
+  status: "Active",
+  rigs: atlasRigs,
+});
 
-  const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  reasoningPanel.scrollIntoView({
-    behavior: prefersReducedMotion ? "auto" : "smooth",
-    block: "start",
+const toolingItems = [
+  { part: "DEMO-DC-325", description: "3.25 in drive cap candidate", family: "Drive Cap", status: "CTS check required" },
+  { part: "DEMO-SP-200", description: "2 in split spoon assembly", family: "Split Spoon", status: "Shoe style required" },
+  { part: "DEMO-HSA-425", description: "4.25 in hollow stem auger", family: "HSA", status: "Connection required" },
+  { part: "DEMO-AWJ-SHOE", description: "AWJ casing shoe", family: "Casing", status: "Candidate" },
+  { part: "DEMO-M3L6-ROT", description: "3L6 pump rotor candidate", family: "Moyno", status: "Model check required" },
+  { part: "DEMO-HEX-STD", description: "STD Duty center component", family: "HEX-COR", status: "Family check required" },
+  { part: "DEMO-SPT-SHOE", description: "Split spoon shoe candidate", family: "Sampling", status: "Style required" },
+];
+
+const inventoryItems = [
+  { part: "DEMO-AW-ROD", description: "3.25 in AW rod", onHand: 84, allocated: 20, bin: "T-14" },
+  { part: "DEMO-AW-SHOE", description: "AWJ casing shoe", onHand: 22, allocated: 4, bin: "T-08" },
+  { part: "DEMO-SPT-SHOE", description: "Split spoon shoe", onHand: 31, allocated: 8, bin: "S-03" },
+  { part: "DEMO-HOSE-01", description: "Hydraulic hose assembly", onHand: 6, allocated: 2, bin: "P-19" },
+  { part: "DEMO-SEAL-57", description: "Rotary seal kit", onHand: 11, allocated: 1, bin: "P-07" },
+];
+
+const workspaceEntries = [
+  { id: "workspace-customer", label: "Customer Profile", detail: "Customer workspace", category: "Workspace", action: "customer", aliases: "customer client account profile company" },
+  { id: "workspace-tooling", label: "Tooling", detail: "Tooling search", category: "Workspace", action: "tooling", aliases: "tooling drive cap split spoon auger casing moyno drill rod sampler" },
+  { id: "workspace-quotes", label: "Quote Builder", detail: "Quotes", category: "Workspace", action: "quotes", aliases: "quote quotes pricing estimate builder" },
+  { id: "workspace-inventory", label: "Inventory", detail: "Inventory lookup", category: "Workspace", action: "inventory", aliases: "inventory stock available availability on hand bin" },
+  { id: "workspace-bom", label: "Rig / BOM View", detail: "Serial and BOM", category: "Workspace", action: "bom", aliases: "rig rigs bom serial assembly parts bill material" },
+];
+
+function normalize(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+
+  for (let row = 1; row <= a.length; row += 1) {
+    const current = [row];
+    for (let column = 1; column <= b.length; column += 1) {
+      const cost = a[row - 1] === b[column - 1] ? 0 : 1;
+      current[column] = Math.min(
+        current[column - 1] + 1,
+        previous[column] + 1,
+        previous[column - 1] + cost,
+      );
+    }
+    previous = current;
+  }
+
+  return previous[b.length];
+}
+
+function tokenScore(query, target) {
+  const queryTokens = normalize(query).split(" ").filter(Boolean);
+  const targetTokens = normalize(target).split(" ").filter(Boolean);
+  if (!queryTokens.length || !targetTokens.length) return 0;
+
+  const scores = queryTokens.map((queryToken) => {
+    return Math.max(
+      ...targetTokens.map((targetToken) => {
+        if (targetToken.startsWith(queryToken) || queryToken.startsWith(targetToken)) return 0.94;
+        const distance = levenshtein(queryToken, targetToken);
+        return 1 - distance / Math.max(queryToken.length, targetToken.length, 1);
+      }),
+    );
   });
+
+  return scores.reduce((total, score) => total + score, 0) / scores.length;
 }
 
-function renderReasoning() {
-  const route = state.route;
-  reasoningTitle.textContent = route.title;
-  routeBadge.textContent = route.workspace;
-  reasoningBody.replaceChildren(
-    reasonCard("Entry preserved", state.query, "MDB keeps the user's original language visible."),
-    reasonCard("Intent", route.intent, route.explanation),
-    reasonCard("Guardrail", route.guardrailTitle, route.guardrail),
+function fuzzyScore(query, target) {
+  const cleanQuery = normalize(query);
+  const cleanTarget = normalize(target);
+  if (!cleanQuery || !cleanTarget) return 0;
+  if (cleanQuery === cleanTarget) return 1;
+  if (cleanTarget.startsWith(cleanQuery)) return 0.97;
+  if (cleanTarget.includes(cleanQuery)) return 0.93;
+
+  const fullDistance = levenshtein(cleanQuery, cleanTarget);
+  const fullScore = 1 - fullDistance / Math.max(cleanQuery.length, cleanTarget.length, 1);
+  return Math.max(fullScore, tokenScore(cleanQuery, cleanTarget));
+}
+
+function allRigEntries() {
+  return customers.flatMap((customer) =>
+    customer.rigs.map((rig) => ({
+      id: `rig-${rig.serial}`,
+      label: rig.serial,
+      detail: `${rig.model} - ${customer.name}`,
+      category: "Rig",
+      action: "bom",
+      rig,
+      customerId: customer.id,
+      aliases: `${rig.serial} ${rig.model} ${customer.name} rig bom serial`,
+    })),
   );
 }
 
-function reasonCard(label, title, description) {
-  const card = document.createElement("article");
-  card.className = "reason-card";
-
-  const chip = document.createElement("span");
-  chip.className = "reason-chip";
-  chip.textContent = label;
-
-  const heading = document.createElement("strong");
-  heading.textContent = title;
-
-  const copy = document.createElement("p");
-  copy.textContent = description;
-
-  card.append(chip, heading, copy);
-  return card;
+function allCustomerEntries() {
+  return customers.map((customer) => ({
+    id: `customer-${customer.id}`,
+    label: customer.name,
+    detail: customer.contact,
+    category: "Customer",
+    action: "customer",
+    customerId: customer.id,
+    aliases: `${customer.name} ${customer.contact} ${customer.phone}`,
+  }));
 }
 
-function renderQuestion() {
-  const question = state.questions[state.questionIndex];
-
-  if (!question) {
-    renderResult();
-    return;
-  }
-
-  questionStage.hidden = false;
-  resultStage.hidden = true;
-  questionCount.textContent = `Progressive question ${state.questionIndex + 1} of ${state.questions.length}`;
-  questionText.textContent = question.prompt;
-  questionHelp.textContent = question.help;
-  answerOptions.replaceChildren();
-
-  question.options.forEach(([label, value]) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "answer-button";
-    button.textContent = label;
-    button.dataset.value = value;
-    button.addEventListener("click", () => selectAnswer(question, label, value));
-    answerOptions.append(button);
-  });
-
-  window.requestAnimationFrame(() => {
-    const firstAnswer = answerOptions.querySelector("button");
-    firstAnswer?.focus({ preventScroll: true });
-  });
+function allToolingEntries() {
+  return toolingItems.map((item) => ({
+    id: `tool-${item.part}`,
+    label: item.description,
+    detail: `${item.part} - ${item.family}`,
+    category: "Tooling",
+    action: "tooling",
+    query: item.description,
+    aliases: `${item.part} ${item.description} ${item.family}`,
+  }));
 }
 
-function selectAnswer(question, label, value) {
-  if (question.reroute) {
-    const nextRouteId = routeSelection[value];
-    state.route = routes[nextRouteId];
-    state.questions = state.route.questions(state.query);
-    state.questionIndex = 0;
-    state.answers = [];
-    state.stopReason = "";
-    renderReasoning();
-    renderQuestion();
-    return;
-  }
-
-  state.answers.push({ id: question.id, label, value });
-
-  if (question.stopValues?.includes(value)) {
-    state.stopReason = value;
-    renderResult();
-    return;
-  }
-
-  state.questionIndex += 1;
-  renderQuestion();
+function findMatches(query, entries, limit = 7) {
+  return entries
+    .map((entry) => ({
+      ...entry,
+      score: fuzzyScore(query, `${entry.label} ${entry.detail || ""} ${entry.aliases || ""}`),
+    }))
+    .filter((entry) => entry.score >= 0.47)
+    .sort((a, b) => b.score - a.score || a.label.localeCompare(b.label))
+    .slice(0, limit);
 }
 
-function renderResult() {
-  const result = state.route.result(state);
-  if (!result) return;
+function escapeHTML(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
 
-  questionStage.hidden = true;
-  resultStage.hidden = false;
-  resultBody.replaceChildren();
+function formatDate(value) {
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${value}T00:00:00Z`));
+}
 
-  if (state.answers.length) {
-    const trail = document.createElement("ul");
-    trail.className = "context-trail";
-    trail.setAttribute("aria-label", "Context gathered");
-    state.answers.forEach((answer) => {
-      const item = document.createElement("li");
-      item.textContent = answer.label;
-      trail.append(item);
+function formatCurrency(value) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(Number(value) || 0);
+}
+
+function showToast(message) {
+  window.clearTimeout(state.toastTimer);
+  toast.textContent = message;
+  toast.hidden = false;
+  state.toastTimer = window.setTimeout(() => {
+    toast.hidden = true;
+  }, 2600);
+}
+
+function showHome() {
+  closeWorkspace();
+  state.activeView = "home";
+  homeView.hidden = false;
+  customerView.hidden = true;
+  calibrationMenu.hidden = true;
+  calibrationButton.setAttribute("aria-expanded", "false");
+  globalSearchInput.focus();
+}
+
+function openCustomerWorkspace(customerId = null) {
+  closeWorkspace();
+  state.activeView = "customer";
+  homeView.hidden = true;
+  customerView.hidden = false;
+  renderCustomerList(directoryFilter.value);
+  if (customerId) selectCustomer(customerId);
+  window.scrollTo({ top: 0, behavior: "auto" });
+}
+
+function selectCustomer(customerId) {
+  const customer = customers.find((item) => item.id === customerId);
+  if (!customer) return;
+  state.selectedCustomerId = customer.id;
+  renderCustomerList(directoryFilter.value);
+  renderCustomerProfile(customer);
+  customerSearchInput.value = customer.name;
+  hideSearchResults(customerSearchResults, customerSearchInput);
+}
+
+function renderCustomerList(filter = "") {
+  const matches = filter
+    ? findMatches(filter, allCustomerEntries(), customers.length).map((entry) => entry.customerId)
+    : customers.map((customer) => customer.id);
+
+  customerList.replaceChildren();
+  customers
+    .filter((customer) => matches.includes(customer.id))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .forEach((customer) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = customer.name;
+      button.className = customer.id === state.selectedCustomerId ? "is-selected" : "";
+      button.setAttribute("role", "listitem");
+      button.addEventListener("click", () => selectCustomer(customer.id));
+      customerList.append(button);
     });
-    resultBody.append(trail);
-  }
+}
 
-  const card = document.createElement("div");
-  card.className = "result-card";
+function renderCustomerProfile(customer) {
+  const activeRigs = customer.rigs.filter((rig) => rig.status === "Active").length;
+  const inactiveRigs = customer.rigs.length - activeRigs;
+  const rigYears = customer.rigs.map((rig) => rig.year);
+  const clientYear = rigYears.length ? Math.min(...rigYears) : customer.customerSince;
 
-  const main = document.createElement("div");
-  main.className = "result-main";
+  const purchaseRows = customer.purchases
+    .map(
+      (purchase) => `
+        <tr>
+          <td>${escapeHTML(formatDate(purchase.date))}</td>
+          <td>${escapeHTML(purchase.type)}</td>
+          <td>${escapeHTML(purchase.description)}</td>
+          <td class="is-number">${escapeHTML(purchase.quantity)}</td>
+          <td class="is-number">${escapeHTML(formatCurrency(purchase.amount))}</td>
+        </tr>`,
+    )
+    .join("");
 
-  const status = document.createElement("span");
-  status.className = `result-status result-status--${result.tone}`;
-  status.textContent = result.status;
+  const rigRows = customer.rigs.length
+    ? customer.rigs
+        .map(
+          (rig) => `
+            <tr>
+              <td>${escapeHTML(rig.model)}</td>
+              <td><button class="table-button bom-link" type="button" data-serial="${escapeHTML(rig.serial)}">${escapeHTML(rig.serial)}</button></td>
+              <td>${escapeHTML(rig.year)}</td>
+              <td><span class="status-pill${rig.status === "Active" ? "" : " status-pill--inactive"}">${escapeHTML(rig.status)}</span></td>
+              <td><button class="table-button bom-link" type="button" data-serial="${escapeHTML(rig.serial)}">View BOM</button></td>
+            </tr>`,
+        )
+        .join("")
+    : `<tr><td colspan="5">No confirmed Mobile Drill rigs.</td></tr>`;
 
-  const heading = document.createElement("h3");
-  heading.textContent = result.title;
+  const legendColors = ["#0758a6", "#31a9e0", "#d71920", "#7aa7c5", "#cbd9e2"];
+  const dnaLegend = customer.tooling.categories
+    .map(
+      ([label, percent], index) => `
+        <li><span class="legend-dot" style="--dot:${legendColors[index]}"></span>${escapeHTML(label)} (${percent}%)</li>`,
+    )
+    .join("");
 
-  const summary = document.createElement("p");
-  summary.textContent = result.summary;
+  const toolingRank = customer.tooling.mostUsed.map((item) => `<li>${escapeHTML(item)}</li>`).join("");
 
-  const notes = document.createElement("ul");
-  notes.className = "result-notes";
-  result.notes.forEach((note) => {
-    const item = document.createElement("li");
-    item.textContent = note;
-    notes.append(item);
+  const interactions = customer.interactions
+    .map(
+      (interaction) => `
+        <li class="interaction-item">
+          <span class="interaction-icon" aria-hidden="true">${escapeHTML(interaction.type.slice(0, 1))}</span>
+          <div>
+            <strong>${escapeHTML(interaction.type)} <small>${escapeHTML(formatDate(interaction.date))}</small></strong>
+            <span>${escapeHTML(interaction.text)}</span>
+          </div>
+          <small>${escapeHTML(interaction.owner)}</small>
+        </li>`,
+    )
+    .join("");
+
+  customerProfile.innerHTML = `
+    <div class="profile-grid">
+      <div class="profile-column">
+        <article class="info-card">
+          <header class="card-heading">
+            <h2>Customer Information</h2>
+            <button class="small-button" type="button" data-edit-customer>Edit</button>
+          </header>
+          <div class="card-body">
+            <dl class="customer-facts">
+              <dt>Company Name</dt><dd>${escapeHTML(customer.name)}</dd>
+              <dt>Primary Contact</dt><dd>${escapeHTML(customer.contact)}</dd>
+              <dt>Title</dt><dd>${escapeHTML(customer.title)}</dd>
+              <dt>Email</dt><dd><a href="mailto:${escapeHTML(customer.email)}">${escapeHTML(customer.email)}</a></dd>
+              <dt>Phone</dt><dd>${escapeHTML(customer.phone)}</dd>
+              <dt>Address</dt><dd>${escapeHTML(customer.address)}</dd>
+              <dt>Website</dt><dd>${escapeHTML(customer.website)}</dd>
+              <dt>Customer Since</dt><dd>${escapeHTML(customer.customerSince)}</dd>
+              <dt>Credit Terms</dt><dd>${escapeHTML(customer.creditTerms)}</dd>
+              <dt>Customer Status</dt><dd><span class="status-pill${customer.status === "Active" ? "" : " status-pill--inactive"}">${escapeHTML(customer.status)}</span></dd>
+            </dl>
+          </div>
+        </article>
+
+        <article class="info-card">
+          <header class="card-heading">
+            <h2>Purchase History</h2>
+            <small>${customer.purchases.length} records</small>
+          </header>
+          <div class="table-scroll purchase-table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Date</th><th>Type</th><th>Item Description</th><th class="is-number">Qty</th><th class="is-number">Amount</th></tr></thead>
+              <tbody>${purchaseRows}</tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+
+      <div class="profile-column">
+        <article class="info-card">
+          <header class="card-heading">
+            <h2>Rig &amp; Fleet <small>(Confirmed Rigs)</small></h2>
+            <button class="small-button" type="button" data-open-all-rigs>View All Rigs</button>
+          </header>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead><tr><th>Rig Model</th><th>Serial Number</th><th>Year</th><th>Status</th><th>BOM</th></tr></thead>
+              <tbody>${rigRows}</tbody>
+            </table>
+          </div>
+          <div class="fleet-summary">
+            <div class="fleet-stat"><span>Total Rigs</span><strong>${customer.rigs.length}</strong></div>
+            <div class="fleet-stat"><span>Active</span><strong>${activeRigs}</strong></div>
+            <div class="fleet-stat"><span>Inactive</span><strong>${inactiveRigs}</strong></div>
+            <div class="fleet-stat"><span>Client Year</span><strong>${escapeHTML(clientYear)}</strong></div>
+          </div>
+        </article>
+
+        <article class="info-card">
+…1243 tokens truncated…("click", () => {
+    calibrationMenu.hidden = true;
+    calibrationButton.setAttribute("aria-expanded", "false");
+    openWorkspace("quotes", { customerId: customer.id, calibration: true });
   });
+}
 
-  main.append(status, heading, summary, notes);
+function closeWorkspace() {
+  workspaceOverlay.hidden = true;
+  state.activeWorkspace = null;
+  overlayBody.replaceChildren();
+}
 
-  const nextAction = document.createElement("aside");
-  nextAction.className = "next-action";
-  const nextLabel = document.createElement("span");
-  nextLabel.textContent = "Next controlled action";
-  const nextTitle = document.createElement("strong");
-  nextTitle.textContent = result.nextAction;
-  const nextCopy = document.createElement("p");
-  nextCopy.textContent = result.nextDetail;
-  nextAction.append(nextLabel, nextTitle, nextCopy);
+function openWorkspace(type, options = {}) {
+  const titles = {
+    tooling: "Tooling",
+    quotes: "Quote Builder",
+    inventory: "Inventory",
+    bom: "Rig / BOM View",
+  };
+  if (!titles[type]) return;
 
-  card.append(main, nextAction);
-  resultBody.append(card);
+  state.activeWorkspace = type;
+  overlayEyebrow.textContent = "MDB";
+  overlayTitle.textContent = titles[type];
+  workspaceOverlay.hidden = false;
+  calibrationMenu.hidden = true;
+  calibrationButton.setAttribute("aria-expanded", "false");
 
-  window.requestAnimationFrame(() => {
-    refineButton.focus({ preventScroll: true });
+  if (type === "tooling") renderToolingWorkspace(options.query || "");
+  if (type === "quotes") renderQuoteWorkspace(options);
+  if (type === "inventory") renderInventoryWorkspace(options.query || "");
+  if (type === "bom") renderBomWorkspace(options.serial || "");
+  window.scrollTo({ top: 0, behavior: "auto" });
+}
+
+function toolingMatches(query) {
+  if (!query.trim()) return toolingItems;
+  return findMatches(query, allToolingEntries(), toolingItems.length)
+    .map((entry) => toolingItems.find((item) => `tool-${item.part}` === entry.id))
+    .filter(Boolean);
+}
+
+function renderToolingTable(items) {
+  const tableBody = document.querySelector("#toolingTableBody");
+  if (!tableBody) return;
+  tableBody.innerHTML = items.length
+    ? items
+        .map(
+          (item) => `
+            <tr>
+              <td>${escapeHTML(item.part)}</td>
+              <td>${escapeHTML(item.description)}</td>
+              <td>${escapeHTML(item.family)}</td>
+              <td>${escapeHTML(item.status)}</td>
+              <td><button class="table-button" type="button" data-tool-detail="${escapeHTML(item.part)}">View</button></td>
+            </tr>`,
+        )
+        .join("")
+    : `<tr><td colspan="5">No close tooling match.</td></tr>`;
+
+  tableBody.querySelectorAll("[data-tool-detail]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const item = toolingItems.find((tool) => tool.part === button.dataset.toolDetail);
+      if (item) showToast(`${item.description}: ${item.status}`);
+    });
   });
 }
 
-function answerValue(id) {
-  return state.answers.find((answer) => answer.id === id)?.value;
+function renderToolingWorkspace(initialQuery) {
+  overlayBody.innerHTML = `
+    <div class="workbench">
+      <div class="workbench-bar">
+        <label class="inline-search">
+          <span class="search-mark" aria-hidden="true"></span>
+          <input id="toolingSearch" type="search" autocomplete="off" spellcheck="false" placeholder="Search tooling, family, description or part number..." value="${escapeHTML(initialQuery)}">
+        </label>
+      </div>
+      <article class="info-card">
+        <header class="card-heading"><h2>Tooling Results</h2><small>Demo records</small></header>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr><th>Part Number</th><th>Description</th><th>Family</th><th>Status</th><th></th></tr></thead>
+            <tbody id="toolingTableBody"></tbody>
+          </table>
+        </div>
+      </article>
+    </div>`;
+
+  const toolingSearch = document.querySelector("#toolingSearch");
+  const update = () => renderToolingTable(toolingMatches(toolingSearch.value));
+  toolingSearch.addEventListener("input", update);
+  update();
+  toolingSearch.focus();
 }
 
-function toolingResult() {
-  const evidence =
-    answerValue("connection-detail") ||
-    answerValue("spoon-variables") ||
-    answerValue("moyno-marking") ||
-    answerValue("tooling-evidence");
-  const strongerEvidence = ["complete", "confirmed", "existing-pn", "readable"].includes(evidence);
+function renderInventoryTable(query = "") {
+  const entries = inventoryItems.map((item) => ({
+    ...item,
+    id: item.part,
+    label: item.description,
+    detail: item.part,
+    aliases: `${item.part} ${item.description} ${item.bin}`,
+  }));
+  const results = query.trim()
+    ? findMatches(query, entries, entries.length).map((result) => inventoryItems.find((item) => item.part === result.id)).filter(Boolean)
+    : inventoryItems;
+  const body = document.querySelector("#inventoryTableBody");
+  if (!body) return;
+  body.innerHTML = results.length
+    ? results
+        .map(
+          (item) => `
+            <tr>
+              <td>${escapeHTML(item.part)}</td>
+              <td>${escapeHTML(item.description)}</td>
+              <td class="is-number">${item.onHand}</td>
+              <td class="is-number">${item.allocated}</td>
+              <td class="is-number"><strong>${item.onHand - item.allocated}</strong></td>
+              <td>${escapeHTML(item.bin)}</td>
+            </tr>`,
+        )
+        .join("")
+    : `<tr><td colspan="6">No close inventory match.</td></tr>`;
+}
 
+function renderInventoryWorkspace(initialQuery) {
+  overlayBody.innerHTML = `
+    <div class="workbench">
+      <div class="workbench-bar">
+        <label class="inline-search">
+          <span class="search-mark" aria-hidden="true"></span>
+          <input id="inventorySearch" type="search" autocomplete="off" spellcheck="false" placeholder="Search inventory..." value="${escapeHTML(initialQuery)}">
+        </label>
+      </div>
+      <article class="info-card">
+        <header class="card-heading"><h2>Inventory</h2><small>Demo availability</small></header>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr><th>Part Number</th><th>Description</th><th class="is-number">On Hand</th><th class="is-number">Allocated</th><th class="is-number">Available</th><th>Bin</th></tr></thead>
+            <tbody id="inventoryTableBody"></tbody>
+          </table>
+        </div>
+      </article>
+    </div>`;
+  const inventorySearch = document.querySelector("#inventorySearch");
+  inventorySearch.addEventListener("input", () => renderInventoryTable(inventorySearch.value));
+  renderInventoryTable(initialQuery);
+  inventorySearch.focus();
+}
+
+function quoteCustomerOptions(selectedId) {
+  return `<option value="">Select customer...</option>${customers
+    .map(
+      (customer) => `<option value="${escapeHTML(customer.id)}"${customer.id === selectedId ? " selected" : ""}>${escapeHTML(customer.name)}</option>`,
+    )
+    .join("")}`;
+}
+
+function freshQuote(options = {}) {
+  const lines = options.calibration
+    ? [{ part: "CAL-SPT", description: "SPT calibration service", quantity: 1, price: 1450 }]
+    : [{ part: "", description: "", quantity: 1, price: 0 }];
   return {
-    tone: strongerEvidence ? "route" : "verify",
-    status: strongerEvidence ? "Candidate path identified" : "Compatibility inputs required",
-    title: `Tooling path for “${state.query}”`,
-    summary:
-      "MDB has narrowed the request to a controlled tooling path without inventing a part number or flattening related components into the first result.",
-    notes: [
-      "Current CTS documents and WS004 govern the execution path.",
-      "Customer purchase history may suggest tooling DNA, but it does not prove current configuration.",
-      "BOM or package expansion remains secondary until the primary item and required variables are confirmed.",
-    ],
-    nextAction: "Open the Tooling Workspace",
-    nextDetail: strongerEvidence
-      ? "Carry the gathered variables into the compatibility gate and return labeled candidates."
-      : "Collect the missing family, size, connection, style, or model evidence before quote-prep.",
+    customerId: options.customerId || state.selectedCustomerId || "",
+    contact: "",
+    reference: "",
+    terms: "Net 30",
+    lines,
   };
 }
 
-function partsResult() {
-  const serialContext = answerValue("serial-context");
-  const hasSerial = serialContext === "serial";
+function renderQuoteWorkspace(options = {}) {
+  state.quote = freshQuote(options);
+  overlayBody.innerHTML = `
+    <div class="quote-layout">
+      <section class="quote-form">
+        <div class="quote-fields">
+          <label class="field"><span>Customer</span><select id="quoteCustomer">${quoteCustomerOptions(state.quote.customerId)}</select></label>
+          <label class="field"><span>Contact</span><input id="quoteContact" type="text" placeholder="Contact"></label>
+          <label class="field"><span>Quote Date</span><input id="quoteDate" type="date" value="${new Date().toISOString().slice(0, 10)}"></label>
+          <label class="field"><span>Salesperson</span><input id="quoteSalesperson" type="text" value="Demo Rep"></label>
+          <label class="field"><span>Customer Reference</span><input id="quoteReference" type="text" placeholder="PO / request / job"></label>
+          <label class="field"><span>Terms</span><select id="quoteTerms"><option>Net 30</option><option>Prepay</option><option>Credit card</option></select></label>
+        </div>
 
-  return {
-    tone: hasSerial ? "safe" : "verify",
-    status: hasSerial ? "Serial path available" : "Verification required",
-    title: hasSerial ? "Ready to enter the serial/BOM path" : `Possible part path for “${state.query}”`,
-    summary: hasSerial
-      ? "The serial can anchor the rig portal, BOM hierarchy, and part-detail path."
-      : "MDB can preserve this as a candidate, but model-only or description-only context is not serial-BOM authority.",
-    notes: [
-      "Exact part identity and Where Used remain separate questions.",
-      "Related assemblies stay collapsed until the user asks for the branch.",
-      "Current pricing, inventory, and ordering truth remain in GP.",
-    ],
-    nextAction: hasSerial ? "Open Rig Portal" : "Gather serial or BOM evidence",
-    nextDetail: hasSerial
-      ? "Use the active serial to inspect the relevant assembly branch."
-      : "Return a clearly labeled proxy if the serial cannot be obtained.",
-  };
+        <div class="quote-lines">
+          <h3>Quote Lines</h3>
+          <div id="quoteLineRows"></div>
+          <button id="addQuoteLine" class="secondary-button" type="button">Add Line</button>
+        </div>
+      </section>
+
+      <aside class="quote-summary">
+        <h3>Quote Summary</h3>
+        <div class="summary-row"><span>Subtotal</span><strong id="quoteSubtotal">$0.00</strong></div>
+        <div class="summary-row"><span>Tax</span><strong>$0.00</strong></div>
+        <div class="summary-row total"><span>Total</span><strong id="quoteTotal">$0.00</strong></div>
+        <button id="saveQuote" class="primary-button" type="button">Save Demo Quote</button>
+        <p id="quoteState" class="quote-state"></p>
+      </aside>
+    </div>`;
+
+  const selectedCustomer = customers.find((customer) => customer.id === state.quote.customerId);
+  if (selectedCustomer) document.querySelector("#quoteContact").value = selectedCustomer.contact;
+  renderQuoteLines();
+
+  document.querySelector("#quoteCustomer").addEventListener("change", (event) => {
+    state.quote.customerId = event.target.value;
+    const customer = customers.find((item) => item.id === state.quote.customerId);
+    document.querySelector("#quoteContact").value = customer?.contact || "";
+  });
+  document.querySelector("#addQuoteLine").addEventListener("click", () => {
+    state.quote.lines.push({ part: "", description: "", quantity: 1, price: 0 });
+    renderQuoteLines();
+  });
+  document.querySelector("#saveQuote").addEventListener("click", saveDemoQuote);
 }
 
-function rigsResult() {
-  const mode = answerValue("rig-mode");
-  const guided = mode === "guided";
+function renderQuoteLines() {
+  const rows = document.querySelector("#quoteLineRows");
+  if (!rows) return;
+  rows.innerHTML = state.quote.lines
+    .map(
+      (line, index) => `
+        <div class="quote-line" data-line-index="${index}">
+          <input class="line-input" data-field="part" type="text" aria-label="Part number" placeholder="Part #" value="${escapeHTML(line.part)}">
+          <input class="line-input line-description" data-field="description" type="text" aria-label="Description" placeholder="Description" value="${escapeHTML(line.description)}">
+          <input class="line-input" data-field="quantity" type="number" min="1" aria-label="Quantity" value="${escapeHTML(line.quantity)}">
+          <input class="line-input" data-field="price" type="number" min="0" step="0.01" aria-label="Unit price" value="${escapeHTML(line.price)}">
+          <button class="line-remove" type="button" aria-label="Remove line" data-remove-line="${index}">&#215;</button>
+        </div>`,
+    )
+    .join("");
 
-  return {
-    tone: guided ? "verify" : "route",
-    status: guided ? "Application context required" : "Mode identified",
-    title: guided ? "Guided Selling path ready" : `Rig reference path for “${state.query}”`,
-    summary: guided
-      ? "MDB identified a customer-fit request and will gather application variables before comparing recommendations."
-      : "MDB identified a reference or comparison request without treating model facts as a customer recommendation.",
-    notes: [
-      "Model/spec lookup can stay in Reference Mode.",
-      "Customer selection requires application, depth, tooling, transport, and operating constraints as applicable.",
-      "A specific serial routes back through the rig portal for build-level truth.",
-    ],
-    nextAction: guided ? "Start guided application intake" : "Open controlled rig reference",
-    nextDetail: guided
-      ? "Ask for the smallest missing application variable first."
-      : "Show sourced model facts and label any unresolved comparison gaps.",
-  };
+  rows.querySelectorAll(".quote-line").forEach((row) => {
+    const index = Number(row.dataset.lineIndex);
+    row.querySelectorAll("[data-field]").forEach((input) => {
+      input.addEventListener("input", () => {
+        const field = input.dataset.field;
+        state.quote.lines[index][field] = ["quantity", "price"].includes(field) ? Number(input.value) : input.value;
+        updateQuoteTotals();
+      });
+    });
+  });
+  rows.querySelectorAll("[data-remove-line]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (state.quote.lines.length === 1) {
+        state.quote.lines[0] = { part: "", description: "", quantity: 1, price: 0 };
+      } else {
+        state.quote.lines.splice(Number(button.dataset.removeLine), 1);
+      }
+      renderQuoteLines();
+    });
+  });
+  updateQuoteTotals();
 }
 
-function troubleshootingResult() {
-  if (state.stopReason) {
-    return {
-      tone: "stop",
-      status: "Stop condition",
-      title: "Secure the machine before continuing",
-      summary:
-        "MDB will not continue diagnosis while the machine is operating or the safe state is uncertain.",
-      notes: [
-        "Follow the applicable company safety and lockout procedures.",
-        "Escalate whenever the issue exceeds the user's knowledge, authority, comfort, or risk tolerance.",
-        "No replacement part is suggested from the symptom alone.",
-      ],
-      nextAction: "Stop and escalate",
-      nextDetail: "Resume the workflow only after an authorized person confirms a safe inspection state.",
-    };
+function updateQuoteTotals() {
+  const total = state.quote.lines.reduce((sum, line) => sum + (Number(line.quantity) || 0) * (Number(line.price) || 0), 0);
+  const subtotal = document.querySelector("#quoteSubtotal");
+  const totalElement = document.querySelector("#quoteTotal");
+  if (subtotal) subtotal.textContent = formatCurrency(total);
+  if (totalElement) totalElement.textContent = formatCurrency(total);
+}
+
+function saveDemoQuote() {
+  if (!state.quote.customerId) {
+    showToast("Select a customer before saving the demo quote.");
+    document.querySelector("#quoteCustomer")?.focus();
+    return;
   }
-
-  return {
-    tone: "route",
-    status: "System route identified",
-    title: "Troubleshooting path ready",
-    summary:
-      "The symptom now has a safe-state confirmation and a system-level route, but it is not yet a diagnosis or part recommendation.",
-    notes: [
-      "Preserve the exact symptom and operating conditions.",
-      "Collect serial/model, photos, pressure state, recent work, and other evidence appropriate to the system.",
-      "Escalate instead of forcing certainty when the issue exceeds the user's comfort or authority.",
-    ],
-    nextAction: "Open system isolation workflow",
-    nextDetail: "Use the selected system to ask the next diagnostic question and prepare a qualified handoff.",
-  };
-}
-
-function calibrationResult() {
-  const goal = answerValue("calibration-goal");
-  const goalLabels = {
-    schedule: "service and scheduling",
-    training: "technician training",
-    data: "data-quality troubleshooting",
-    report: "report and customer communication",
-  };
-
-  return {
-    tone: answerValue("hammer-context") === "unknown" ? "verify" : "route",
-    status: answerValue("hammer-context") === "unknown" ? "Configuration needed" : "Calibration route identified",
-    title: `Calibration ${goalLabels[goal] || "support"} path`,
-    summary:
-      "MDB has separated the requested support outcome from final report, certification, pricing, and scheduling authority.",
-    notes: [
-      "Preserve hammer configuration and status as explicit context.",
-      "Low-energy or failed-data requests route to data-quality troubleshooting and training support.",
-      "Formal report generation and external certification remain outside this demo's authority.",
-    ],
-    nextAction: "Open Calibration Workspace",
-    nextDetail: "Carry the selected outcome and known hammer context into the appropriate support lane.",
-  };
-}
-
-function knowledgeResult() {
-  const mode = answerValue("learning-mode");
-  const actionRequested = mode === "action";
-
-  return {
-    tone: actionRequested ? "verify" : "route",
-    status: actionRequested ? "Action route required" : "Reference mode",
-    title: actionRequested ? "Move from learning to a controlled workspace" : "Reference and training path ready",
-    summary: actionRequested
-      ? "The intent has changed from explanation to action, so training content cannot supply quote, part, diagnosis, or scheduling authority."
-      : "MDB can explain the topic, prepare the user for a call, or run practice without pretending the example is operational truth.",
-    notes: [
-      "Training examples never override source authority.",
-      "Serial-specific part questions route to Rig Parts.",
-      "Quote, rig-selection, calibration, and troubleshooting intent route to their controlled workspaces.",
-    ],
-    nextAction: actionRequested ? "Choose the action intent" : "Open Reference & Training",
-    nextDetail: actionRequested
-      ? "Return to universal entry with the action, item, serial, or symptom stated directly."
-      : "Use the original language as the topic and keep action boundaries visible.",
-  };
-}
-
-function customerResult() {
-  return {
-    tone: "route",
-    status: "Customer context route",
-    title: "Customer starting point identified",
-    summary:
-      "MDB can preserve customer and fleet context, then expand into the technical or commercial workspace only when needed.",
-    notes: [
-      "GP remains transactional authority for billing, purchase history, pricing, orders, invoices, and inventory.",
-      "Salesforce remains relationship and pipeline authority.",
-      "Purchase history can guide questions but cannot prove current tooling or equipment configuration.",
-    ],
-    nextAction: "Open Customer Profile",
-    nextDetail: "Carry the selected goal forward without merging the three authority types.",
-  };
-}
-
-searchForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const query = searchInput.value.trim().replace(/\s+/g, " ");
-
-  if (!query) {
-    searchError.textContent = "Enter something MDB can route.";
-    searchInput.focus();
+  if (!state.quote.lines.some((line) => line.description.trim())) {
+    showToast("Add at least one quote line.");
     return;
   }
 
-  startSearch(query.slice(0, 140));
-});
+  const saved = JSON.parse(localStorage.getItem("mdbDemoQuotes") || "[]");
+  const quoteNumber = `D-${String(saved.length + 1).padStart(4, "0")}`;
+  saved.push({ ...state.quote, quoteNumber, savedAt: new Date().toISOString() });
+  localStorage.setItem("mdbDemoQuotes", JSON.stringify(saved));
+  document.querySelector("#quoteState").textContent = `${quoteNumber} saved for this demo session.`;
+  showToast(`Demo quote ${quoteNumber} saved.`);
+}
 
-document.querySelectorAll(".example-query").forEach((button) => {
+function findRig(serial) {
+  return allRigEntries().find((entry) => entry.rig.serial === serial);
+}
+
+function renderBomWorkspace(serial = "") {
+  const rigEntry = serial ? findRig(serial) : null;
+  overlayBody.innerHTML = `
+    <div class="workbench">
+      <div class="workbench-bar">
+        <label class="inline-search">
+          <span class="search-mark" aria-hidden="true"></span>
+          <input id="bomSearch" type="search" autocomplete="off" spellcheck="false" placeholder="Search rig model or serial..." value="${escapeHTML(serial)}">
+        </label>
+      </div>
+      <div id="bomContent"></div>
+    </div>`;
+
+  const bomSearch = document.querySelector("#bomSearch");
+  const update = () => renderBomContent(bomSearch.value);
+  bomSearch.addEventListener("input", update);
+  renderBomContent(rigEntry?.rig.serial || serial);
+  if (!rigEntry) bomSearch.focus();
+}
+
+function renderBomContent(query) {
+  const content = document.querySelector("#bomContent");
+  if (!content) return;
+  const exact = findRig(query.trim());
+
+  if (exact) {
+    const customer = customers.find((item) => item.id === exact.customerId);
+    content.innerHTML = `
+      <article class="info-card">
+        <header class="card-heading">
+          <h2>${escapeHTML(exact.rig.model)} - ${escapeHTML(exact.rig.serial)}</h2>
+          <small>${escapeHTML(customer?.name || "")}</small>
+        </header>
+        <div class="card-body bom-tree">
+          ${bomBranch("01", "Rotary System", [["DEMO-ROT-01", "Rotary drive assembly"], ["DEMO-SEAL-57", "Rotary seal kit"]])}
+          ${bomBranch("02", "Hydraulic System", [["DEMO-HYD-11", "Main hydraulic manifold"], ["DEMO-HOSE-01", "Hydraulic hose assembly"]])}
+          ${bomBranch("03", "Feed & Pullback", [["DEMO-FEED-04", "Feed cylinder assembly"], ["DEMO-WEAR-09", "Wear pad set"]])}
+          ${bomBranch("04", "Water & Pump", [["DEMO-PUMP-03", "Water pump assembly"], ["DEMO-FILT-12", "Suction filter"]])}
+        </div>
+      </article>`;
+    attachBomBranchEvents();
+    return;
+  }
+
+  const matches = query.trim() ? findMatches(query, allRigEntries(), 12) : allRigEntries().slice(0, 12);
+  content.innerHTML = `
+    <article class="info-card">
+      <header class="card-heading"><h2>Confirmed Rigs</h2><small>${matches.length} shown</small></header>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Serial</th><th>Model</th><th>Customer</th><th>Year</th><th></th></tr></thead>
+          <tbody>
+            ${matches.length
+              ? matches
+                  .map((entry) => {
+                    const customer = customers.find((item) => item.id === entry.customerId);
+                    return `<tr><td>${escapeHTML(entry.rig.serial)}</td><td>${escapeHTML(entry.rig.model)}</td><td>${escapeHTML(customer?.name || "")}</td><td>${entry.rig.year}</td><td><button class="table-button" type="button" data-select-rig="${escapeHTML(entry.rig.serial)}">View BOM</button></td></tr>`;
+                  })
+                  .join("")
+              : '<tr><td colspan="5">No close rig or serial match.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </article>`;
+  content.querySelectorAll("[data-select-rig]").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelector("#bomSearch").value = button.dataset.selectRig;
+      renderBomContent(button.dataset.selectRig);
+    });
+  });
+}
+
+function bomBranch(number, title, parts) {
+  return `
+    <div class="bom-branch">
+      <button type="button" aria-expanded="false"><span>${escapeHTML(number)} - ${escapeHTML(title)}</span><span aria-hidden="true">+</span></button>
+      <div class="bom-parts" hidden>
+        <table class="data-table"><thead><tr><th>Part Number</th><th>Description</th></tr></thead><tbody>
+          ${parts.map(([part, description]) => `<tr><td>${escapeHTML(part)}</td><td>${escapeHTML(description)}</td></tr>`).join("")}
+        </tbody></table>
+      </div>
+    </div>`;
+}
+
+function attachBomBranchEvents() {
+  document.querySelectorAll(".bom-branch > button").forEach((button) => {
+    button.addEventListener("click", () => {
+      const parts = button.nextElementSibling;
+      const expanded = button.getAttribute("aria-expanded") === "true";
+      button.setAttribute("aria-expanded", String(!expanded));
+      button.lastElementChild.textContent = expanded ? "+" : "-";
+      parts.hidden = expanded;
+    });
+  });
+}
+
+document.querySelectorAll("[data-open]").forEach((button) => {
   button.addEventListener("click", () => {
-    searchInput.value = button.dataset.query || "";
-    startSearch(searchInput.value);
+    const destination = button.dataset.open;
+    if (destination === "customer") openCustomerWorkspace();
+    else openWorkspace(destination);
   });
 });
 
-refineButton.addEventListener("click", () => {
-  if (!state.answers.length) {
-    searchInput.focus();
+document.querySelectorAll("[data-workspace]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const destination = button.dataset.workspace;
+    const options = destination === "quotes" ? { customerId: state.selectedCustomerId } : {};
+    openWorkspace(destination, options);
+  });
+});
+
+homeButton.addEventListener("click", showHome);
+customerBackButton.addEventListener("click", showHome);
+overlayBackButton.addEventListener("click", closeWorkspace);
+overlayCloseButton.addEventListener("click", closeWorkspace);
+
+globalSearchInput.addEventListener("input", handleGlobalSearch);
+globalSearchInput.addEventListener("focus", () => {
+  if (globalSearchInput.value.trim()) handleGlobalSearch();
+});
+globalSearchInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    globalSearchForm.requestSubmit();
+  }
+});
+globalSearchForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const query = globalSearchInput.value.trim();
+  if (!query) return;
+  state.globalResults = globalMatches(query);
+  if (!state.globalResults.length) {
+    renderSearchResults(globalSearchResults, globalSearchInput, [], chooseGlobalResult);
     return;
   }
 
-  state.stopReason = "";
-  state.answers.pop();
-  state.questionIndex = Math.max(0, state.answers.length);
-  renderQuestion();
+  const numericQuery = /^\d[\d\s-]{3,}$/.test(query);
+  const top = state.globalResults[0];
+  if (numericQuery && !normalize(`${top.label} ${top.detail}`).includes(normalize(query))) {
+    renderSearchResults(globalSearchResults, globalSearchInput, state.globalResults, chooseGlobalResult);
+    showToast("Select the intended serial or part-number suggestion.");
+    return;
+  }
+  chooseGlobalResult(top);
 });
 
-newSearchButton.addEventListener("click", () => {
-  reasoningPanel.hidden = true;
-  resultStage.hidden = true;
-  questionStage.hidden = true;
-  searchInput.value = "";
-  searchError.textContent = "";
-  searchInput.focus();
-  window.scrollTo({ top: 0, behavior: "smooth" });
+customerSearchInput.addEventListener("input", handleCustomerSearch);
+customerSearchInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    customerSearchForm.requestSubmit();
+  }
 });
+customerSearchForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const results = findMatches(customerSearchInput.value, allCustomerEntries(), 8);
+  if (results[0]) selectCustomer(results[0].customerId);
+});
+
+directoryFilter.addEventListener("input", () => renderCustomerList(directoryFilter.value));
+
+calibrationButton.addEventListener("click", () => {
+  renderCalibrationMenu();
+  calibrationMenu.hidden = !calibrationMenu.hidden;
+  calibrationButton.setAttribute("aria-expanded", String(!calibrationMenu.hidden));
+});
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".home-search-wrap")) hideSearchResults(globalSearchResults, globalSearchInput);
+  if (!event.target.closest(".customer-search-wrap")) hideSearchResults(customerSearchResults, customerSearchInput);
+  if (!event.target.closest(".menu-wrap")) {
+    calibrationMenu.hidden = true;
+    calibrationButton.setAttribute("aria-expanded", "false");
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    if (!workspaceOverlay.hidden) closeWorkspace();
+    else {
+      hideSearchResults(globalSearchResults, globalSearchInput);
+      hideSearchResults(customerSearchResults, customerSearchInput);
+      calibrationMenu.hidden = true;
+      calibrationButton.setAttribute("aria-expanded", "false");
+    }
+  }
+});
+
+renderCustomerList();
+
