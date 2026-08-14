@@ -83,7 +83,7 @@ MDB uses expert navigation rather than result dumping.
 
 Core behavior:
 
-- Search first, then progressively narrow
+- Return the strongest available result first, then narrow only when required
 - Preserve active customer, fleet, serial, system, and tooling context
 - Ask the smallest useful clarifying question
 - Treat a search result as a possible match, not a recommendation
@@ -97,17 +97,20 @@ Only explicitly confirmed items may enter Quote-Prep. Suggested, related, compat
 
 ## Demo scope
 
-The ENA/progressive-entry demo proves the front-door reasoning pattern:
+The current operational demo proves the daily-work foundation:
 
-1. One universal entry
-2. Intent detection and workspace routing
-3. Progressive narrowing with one useful question at a time
-4. Source-authority and compatibility guardrails
-5. Tooling, Rig Parts, Rig Sales, Troubleshooting, Calibration, and Reference paths
-6. Clear possible-match, verification-required, stop, and escalation states
+1. Compact universal entry with typo-tolerant search
+2. Direct access to Customer, Tooling, Quotes, Inventory, and Rig/BOM workspaces
+3. A streamlined Customer Profile with customer facts, complete purchase history, confirmed rigs, Tooling DNA, calibration history, and interactions
+4. Direct serial-to-BOM navigation
+5. Workspace overlays that preserve the employee's place
+6. Calibration-to-quote handoff and a functional session-only demo Quote Builder
 
-The browser demo uses safe, built-in example responses. It does not load or expose the raw files in `docs/` or `data/`, and it does not claim live pricing, inventory, serial-BOM, or quote-ready truth.
+The browser demo uses controlled, built-in records to demonstrate full interaction patterns. Demo part numbers, inventory quantities, quote values, customer details, and BOM rows are not production truth. It does not load or expose the raw files in `docs/` or `data/`, and it does not claim live pricing, inventory, serial-BOM, or quote-ready truth.
+
+Training and Knowledge Chapter surfaces are intentionally separate from the normal operational workspace. Current CTS, WS004, compatibility, safety, and authority rules remain execution controls behind the interface rather than user-facing training steps.
 
 ## Run the demo
 
 Open `site/index.html` directly in a browser or serve the `site/` directory with any static web server. No build step is required.
+
