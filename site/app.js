@@ -46,6 +46,7 @@ const state = {
   prospectResults: [],
   prospectParams: { territory: "Midwest", market: "All", radius: "100", keywords: "drilling geotechnical", visual: true },
   workflowTraining: { scenarioId: "first-call", messages: [], matchedKcs: ["KC001"] },
+  activeCalibrationScenario: "",
   rigSalesEditor: null,
   calibrationCustomerId: "",
   rigSpecModel: "B25",
@@ -196,6 +197,137 @@ const workflowTrainingScenarios = {
     facts: { company: "GeoDynamics Inc.", rig: "Mobile Drill B57", serial: "2025023", method: "HSA with AWJ rod and SPT sampling", size: "6-5/8 inch", connection: "3-Key", need: "Ten 5-foot augers, one drive cap, and a compatible center-plug assembly.", quantity: "10 augers, 1 drive cap, 1 center-plug assembly." },
   },
 };
+
+const calibrationTrainingScenarios = [
+  {
+    id: "normal-appointment",
+    title: "Normal Appointment",
+    subtitle: "Baseline field workflow, no complications.",
+    prompt: "Customer has one rig ready for calibration. Setup is normal — no refusal, no rapid advancement, and no failed pulse check occur.",
+    items: [
+      { text: "Confirms rig, customer, borehole, driller, and tech information", correct: true },
+      { text: "Sets up the analyzer kit correctly", correct: true },
+      { text: "Enters the depth interval correctly", correct: true },
+      { text: "Measures and enters LP and LE", correct: true },
+      { text: "Confirms sensor connection", correct: true },
+      { text: "Runs the pulse check before live collection", correct: true },
+      { text: "Starts collection only after setup is ready", correct: true },
+      { text: "Records 6-inch blow counts", correct: true },
+      { text: "Ends the test properly", correct: true },
+      { text: "Completes the calibration log", correct: true },
+      { text: "Hands off data correctly", correct: true },
+    ],
+  },
+  {
+    id: "failed-pulse-check",
+    title: "Failed Pulse Check",
+    subtitle: "Analyzer hardware trouble before collection starts.",
+    prompt: "The pulse check does not produce the expected graph/ping.",
+    items: [
+      { text: "Holds off starting live data collection until the pulse check passes", correct: true },
+      { text: "Reconnects and checks cables", correct: true },
+      { text: "Checks sensor and pigtail connections", correct: true },
+      { text: "Restarts the software completely", correct: true },
+      { text: "Replaces accelerometers/sensors with backups if needed", correct: true },
+      { text: "Reruns the pulse check before proceeding", correct: true },
+      { text: "Escalates to the office if backup sensors also fail the pulse check", correct: true },
+      { text: "Starts live data collection anyway since the hammer is already running", correct: false, note: "Retrain/retest trigger (Module 010): starting collection after a failed pulse check." },
+      { text: "Keeps guessing at the cause after backup sensors also fail, without calling the office", correct: false, note: "Retrain/retest trigger (Module 010): continuing to guess instead of escalating once backups also fail the pulse check." },
+    ],
+  },
+  {
+    id: "refusal",
+    title: "Refusal",
+    subtitle: "Sampler will not advance a full interval.",
+    prompt: "The sampler does not advance a full 6 inches in 50 blows.",
+    items: [
+      { text: "Recognizes refusal", correct: true },
+      { text: "Records the blow count", correct: true },
+      { text: "Records actual advancement", correct: true },
+      { text: "Documents the depth interval", correct: true },
+      { text: "Communicates the issue professionally", correct: true },
+      { text: "Follows the field decision or escalation path", correct: true },
+      { text: "Treats the run as normal clean calibration data and moves on to the next depth", correct: false, note: "Module 010 pass standard: refusal data must never be treated as normal clean calibration data." },
+    ],
+  },
+  {
+    id: "rapid-advancement",
+    title: "Rapid Advancement / Rod Risk",
+    subtitle: "Instrumented rod at risk of entering the borehole.",
+    prompt: "During the first few blows, the sampler advances quickly and the instrumented rod is at risk of entering the hollow stem auger or borehole.",
+    items: [
+      { text: "Watches the first 6 blows closely", correct: true },
+      { text: "Stops hammer operation before the instrumented rod enters the HSA or borehole", correct: true },
+      { text: "Protects sensors and the instrumented rod", correct: true },
+      { text: "Communicates clearly with the operator", correct: true },
+      { text: "Documents the rapid advancement", correct: true },
+      { text: "Corrects setup or selects another interval if appropriate", correct: true },
+      { text: "Escalates if damage is suspected", correct: true },
+      { text: "Lets the driller keep hammering while checking on the instrumented rod", correct: false, note: "Mandatory retrain/retest trigger (Module 010): allowing hammering to continue while the instrumented rod is at risk." },
+    ],
+  },
+  {
+    id: "depth-blow-count",
+    title: "Wrong Depth Interval / Missing Blow Counts",
+    subtitle: "Software interval doesn't match what actually happened.",
+    prompt: "The trainee entered a 20.0-22.0 ft interval, but the sampler only advanced to 21.5 ft — or the 6-inch blow counts weren't recorded.",
+    items: [
+      { text: "Recognizes the interval mismatch", correct: true },
+      { text: "Corrects documentation on site", correct: true },
+      { text: "Collects another proper data set if needed and possible", correct: true },
+      { text: "Records 6-inch blow counts", correct: true },
+      { text: "Documents what happened", correct: true },
+      { text: "Says the software total is close enough and skips the 6-inch increments", correct: false, note: "Mandatory retrain/retest trigger (Module 010): the software total is not enough by itself without documented 6-inch increments." },
+    ],
+  },
+  {
+    id: "customer-pressure",
+    title: "Customer Pressure / Do-Not-Promise",
+    subtitle: "Driller wants a same-day pass/fail answer.",
+    prompt: "Customer says: “We just need the paperwork. Can you tell us if the hammer is above 60 today and get the report sent over?”",
+    approvedLanguage: "We are checking how much hammer energy is actually getting into the drill rods so your SPT blow counts can be corrected to the N60 standard and used with confidence.",
+    items: [
+      { text: "Uses the approved plain-language explanation instead of calling it paperwork", correct: true },
+      { text: "Explains calibration as energy-transfer measurement", correct: true },
+      { text: "States the standard report delivery expectation (within 3 days) when appropriate", correct: true },
+      { text: "Routes the urgency to the qualified report handler", correct: true },
+      { text: "Protects data quality despite the pressure", correct: true },
+      { text: "Tells the customer the hammer is already above 60", correct: false, note: "Do-not-promise rule (Module 008): never predict a specific energy percentage before the data is reviewed." },
+      { text: "Promises the report will go out today", correct: false, note: "Do-not-promise rule (Module 008): standard delivery is 3 days unless the qualified report handler confirms otherwise." },
+      { text: "Agrees it's basically just paperwork to keep things moving", correct: false, note: "Module 008: calibration is measurement, documentation, compliance, and customer-confidence support — never “just paperwork.”" },
+    ],
+  },
+  {
+    id: "report-handoff",
+    title: "Report Handoff Problem",
+    subtitle: "Field record has a gap the report builder can't fill.",
+    prompt: "Data collection is complete, but the calibration log is incomplete and the report builder can't tell what happened at one interval.",
+    items: [
+      { text: "Confirms the analyzer data file exists", correct: true },
+      { text: "Confirms the calibration log is complete", correct: true },
+      { text: "Verifies depth interval, LP, LE, and blow counts", correct: true },
+      { text: "Adds field notes while the details are still fresh", correct: true },
+      { text: "Provides photos/video if the issue affected calibration data", correct: true },
+      { text: "Routes clarification to the qualified report handler", correct: true },
+      { text: "Hands off the incomplete log as-is since the analyzer data file itself is fine", correct: false, note: "Module 001/010: report builders cannot complete the package if the field record is incomplete — gaps get closed before handoff, not guessed at afterward." },
+    ],
+  },
+  {
+    id: "equipment-damage",
+    title: "Equipment Damage Distinction",
+    subtitle: "Accelerometer vs. suspected strain gauge damage.",
+    prompt: "An accelerometer appears damaged during a job. Variant: strain gauge damage is suspected.",
+    items: [
+      { text: "Checks for cable or connector damage", correct: true },
+      { text: "Replaces the accelerometer with a backup if available", correct: true },
+      { text: "Reruns the pulse check before continuing", correct: true },
+      { text: "Calls the office and documents the damage", correct: true },
+      { text: "Treats any suspected strain gauge damage as an immediate stop, not field-repairable", correct: true },
+      { text: "Routes suspected strain gauge damage through the drill manager / senior authority path", correct: true },
+      { text: "Continues collecting data on a suspected damaged strain gauge without calling it in", correct: false, note: "Module 010: suspected strain gauge damage must never be treated as field-replaceable — stop and call the office immediately." },
+    ],
+  },
+];
 
 const workspaceEntries = [
   ["Customer Profile", "Customer workspace", "customer", "customer client account company"],
@@ -1303,7 +1435,7 @@ function renderCallListWorkspace() {
 }
 
 function renderCalibrationTrainingWorkspace() {
-  elements.overlayBody.innerHTML = `<div class="workbench training-workbench"><div class="training-intro"><span>Practice only</span><h3>Calibration Call Training</h3><p>Run the customer conversation without touching a real customer, calibration record, or quote.</p></div><div class="training-grid"><button type="button" data-training-scenario="calibration-due"><strong>Calibration Due</strong><span>Customer needs scheduling and a quote.</span></button><button type="button" data-training-scenario="missing-history"><strong>Missing History</strong><span>Confirm the hammer and determine the next step.</span></button><button type="button" data-training-scenario="failed-result"><strong>Failed Result</strong><span>Handle the follow-up and escalation.</span></button></div><section id="trainingStage" class="training-stage"><strong>Select a practice scenario.</strong></section></div>`;
+  elements.overlayBody.innerHTML = `<div class="workbench training-workbench"><div class="training-intro"><span>Practice only</span><h3>Calibration Call Training</h3><p>Run the field scenario without touching a real customer, calibration record, or quote. Scored against Module 010's real pass/retrain rules.</p></div><div class="training-grid training-grid--calibration">${calibrationTrainingScenarios.map((scenario) => `<button type="button" data-training-scenario="${scenario.id}"><strong>${escapeHTML(scenario.title)}</strong><span>${escapeHTML(scenario.subtitle)}</span></button>`).join("")}</div><section id="trainingStage" class="training-stage"><strong>Select a practice scenario.</strong></section></div>`;
 }
 
 function renderWorkflowTrainingWorkspace() {
@@ -1416,16 +1548,30 @@ function runWorkflowTrainingTurn(value) {
 function renderTrainingScenario(id) {
   const stage = $("#trainingStage");
   if (!stage) return;
-  const scenarios = {
-    "calibration-due": ["Atlas Geotechnical calls about an automatic hammer nearing its annual date.", "Confirm customer and hammer", "Review calibration history", "Schedule service", "Build dummy quote"],
-    "missing-history": ["A customer has a hammer but no confirmed calibration record.", "Collect identification", "Search customer and rig records", "Mark the GAP", "Set follow-up"],
-    "failed-result": ["A completed test needs technical review before release.", "Do not promise a pass", "Escalate the result", "Document the call", "Set customer follow-up"],
-    "first-call": ["A caller gives a company nickname, a rig description, and a tooling problem.", "Find the customer", "Confirm the rig", "Clarify the need", "Choose the workspace"],
-    "part-search": ["The caller says: ‘I need the cutterhead for our hollow-stem setup.’", "Collect diameter", "Collect connection", "Preserve constraints", "Return the result or GAP"],
-    "quote-run": ["Build a practice quote containing tooling, one rig part, freight, and tax.", "Select customer", "Add verified lines", "Adjust quantity and price", "Save dummy quote"],
-  };
-  const [prompt, ...steps] = scenarios[id] || ["Practice scenario", "Review the request"];
-  stage.innerHTML = `<span class="status-label">Active practice</span><h3>${escapeHTML(prompt)}</h3><ol>${steps.map((step) => `<li><label><input type="checkbox"> ${escapeHTML(step)}</label></li>`).join("")}</ol><button type="button" class="primary-button" data-complete-training>Complete Practice</button>`;
+  const scenario = calibrationTrainingScenarios.find((item) => item.id === id);
+  if (!scenario) { stage.innerHTML = "<strong>Select a practice scenario.</strong>"; return; }
+  state.activeCalibrationScenario = id;
+  stage.innerHTML = `<span class="status-label">Active practice</span><h3>${escapeHTML(scenario.prompt)}</h3>
+    ${scenario.approvedLanguage ? `<div class="calib-approved-language"><strong>Approved field explanation</strong><p>“${escapeHTML(scenario.approvedLanguage)}”</p></div>` : ""}
+    <p class="calib-instructions">Check every action the trainee should take. Leave anything the trainee should not do unchecked.</p>
+    <ol class="calib-checklist">${scenario.items.map((item, index) => `<li><label><input type="checkbox" data-calib-item="${index}"> ${escapeHTML(item.text)}</label></li>`).join("")}</ol>
+    <button type="button" class="primary-button" data-complete-training>Complete Practice</button>
+    <div id="trainingResult"></div>`;
+}
+
+function gradeCalibrationScenario() {
+  const scenario = calibrationTrainingScenarios.find((item) => item.id === state.activeCalibrationScenario);
+  const resultHost = $("#trainingResult");
+  if (!scenario || !resultHost) return;
+  const checkedIndexes = new Set($$("#trainingStage [data-calib-item]").filter((input) => input.checked).map((input) => Number(input.dataset.calibItem)));
+  const missedRequired = scenario.items.filter((item, index) => item.correct && !checkedIndexes.has(index));
+  if (missedRequired.length) { showToast("Check every required action before completing practice"); return; }
+  const trippedTraps = scenario.items.filter((item, index) => !item.correct && checkedIndexes.has(index));
+  if (trippedTraps.length) {
+    resultHost.innerHTML = `<div class="calib-result calib-result--retrain"><span class="status-label status-label--warn">Retrain / retest required</span><ul>${trippedTraps.map((item) => `<li>${escapeHTML(item.note || item.text)}</li>`).join("")}</ul></div>`;
+  } else {
+    resultHost.innerHTML = `<div class="calib-result calib-result--pass"><span class="status-label status-label--good">Pass</span><p>Matches Module 010's pass standard for this scenario. No operational records changed.</p></div>`;
+  }
 }
 
 function handleOverlayInput(event) {
@@ -1577,7 +1723,7 @@ elements.overlayBody.addEventListener("click", (event) => {
   if (event.target.closest("[data-training-restart]")) { ensureWorkflowConversation(true); renderWorkflowTrainingWorkspace(); return; }
   const trainingScenario = event.target.closest("[data-training-scenario]");
   if (trainingScenario) { renderTrainingScenario(trainingScenario.dataset.trainingScenario); return; }
-  if (event.target.closest("[data-complete-training]")) { showToast("Practice completed — no operational records changed"); return; }
+  if (event.target.closest("[data-complete-training]")) { gradeCalibrationScenario(); return; }
   if (event.target.closest("#browseToolingButton")) {
     const toolState = activeToolingState();
     toolState.browseOpen = !toolState.browseOpen;
