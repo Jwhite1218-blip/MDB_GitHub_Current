@@ -203,6 +203,12 @@ const workflowTrainingScenarios = {
   },
 };
 
+// Rep identity, admin PIN gate, and one-attempt locking are built and working
+// (see calibrationReps / gradeCalibrationScenario below), but flagged off for
+// now while the demo is still open for anyone to poke at freely. Flip this to
+// true when it's time to actually run it as tracked rep training.
+const calibIdentityGateEnabled = false;
+
 const calibrationAdminPin = "2523";
 
 const calibrationReps = [
@@ -1507,22 +1513,22 @@ function renderCallListWorkspace() {
 }
 
 function renderCalibrationTrainingWorkspace() {
-  if (!state.calibIdentity) { renderCalibIdentityPicker(); return; }
+  if (calibIdentityGateEnabled && !state.calibIdentity) { renderCalibIdentityPicker(); return; }
   state.calibView = "scenarios";
-  const identity = state.calibIdentity;
-  const adminActive = identity.isAdmin && state.calibAdminUnlocked;
+  const identity = calibIdentityGateEnabled ? state.calibIdentity : null;
+  const adminActive = calibIdentityGateEnabled && identity?.isAdmin && state.calibAdminUnlocked;
   elements.overlayBody.innerHTML = `<div class="workbench training-workbench">
     <div class="training-intro"><span>Practice only</span><h3>Calibration Call Training</h3><p>Run the field scenario without touching a real customer, calibration record, or quote. Scored against Module 010's real pass/retrain rules.</p></div>
-    <div class="calib-identity-bar">
+    ${identity ? `<div class="calib-identity-bar">
       <span>Signed in as <strong>${escapeHTML(identity.name)} (${escapeHTML(identity.initials)})</strong></span>
       <div class="calib-identity-actions">
         ${identity.isAdmin ? (adminActive ? `<button type="button" class="secondary-button" data-calib-admin-console>Admin Console</button><button type="button" class="secondary-button" data-calib-lock-admin>Lock Admin Mode</button>` : `<button type="button" class="secondary-button" data-calib-unlock-admin>Unlock Admin Mode</button>`) : ""}
         <button type="button" class="secondary-button" data-calib-switch-user>Switch User</button>
       </div>
-    </div>
+    </div>` : ""}
     <div class="training-grid training-grid--calibration">${calibrationTrainingScenarios.map((scenario) => {
-      const record = latestCalibResult(identity.initials, scenario.id);
-      const locked = state.calibLocks[calibLockKey(identity.initials, scenario.id)];
+      const record = identity ? latestCalibResult(identity.initials, scenario.id) : null;
+      const locked = identity ? state.calibLocks[calibLockKey(identity.initials, scenario.id)] : false;
       const badge = record ? `<span class="calib-lock-badge ${locked ? "calib-lock-badge--locked" : ""}">${locked ? "Locked" : "Reopened"} · ${record.outcome}</span>` : "";
       return `<button type="button" data-training-scenario="${scenario.id}"><strong>${escapeHTML(scenario.title)}</strong><span>${escapeHTML(scenario.subtitle)}</span>${badge}</button>`;
     }).join("")}</div>
@@ -1576,7 +1582,7 @@ function renderTrainingScenario(id) {
   if (!scenario) { stage.innerHTML = "<strong>Select a practice scenario.</strong>"; return; }
   state.activeCalibrationScenario = id;
   const identity = state.calibIdentity;
-  const locked = state.calibLocks[calibLockKey(identity.initials, scenario.id)];
+  const locked = calibIdentityGateEnabled && identity && state.calibLocks[calibLockKey(identity.initials, scenario.id)];
   if (locked) {
     const record = latestCalibResult(identity.initials, scenario.id);
     stage.innerHTML = `<span class="status-label status-label--warn">Locked</span><h3>${escapeHTML(scenario.prompt)}</h3>
@@ -1590,7 +1596,7 @@ function renderTrainingScenario(id) {
   }
   stage.innerHTML = `<span class="status-label">Active practice</span><h3>${escapeHTML(scenario.prompt)}</h3>
     ${scenario.approvedLanguage ? `<div class="calib-approved-language"><strong>Approved field explanation</strong><p>“${escapeHTML(scenario.approvedLanguage)}”</p></div>` : ""}
-    <p class="calib-instructions">Check every action the trainee should take, fill in any blanks, and put any workflow steps in order. This locks after one submission — an admin has to reopen it for a retest.</p>
+    <p class="calib-instructions">Check every action the trainee should take, fill in any blanks, and put any workflow steps in order.${calibIdentityGateEnabled ? " This locks after one submission — an admin has to reopen it for a retest." : ""}</p>
     <ol class="calib-checklist">${scenario.items.map((item, index) => renderCalibItem(item, index)).join("")}</ol>
     <button type="button" class="primary-button" data-complete-training>Complete Practice</button>
     <div id="trainingResult"></div>`;
@@ -1614,7 +1620,7 @@ function renderCalibResultPanel(record, statusNote) {
     <span class="status-label ${record.outcome === "PASS" ? "status-label--good" : "status-label--warn"}">${record.outcome === "PASS" ? "Pass" : "Retrain / retest required"}</span>
     ${record.missed.length ? `<ul>${record.missed.map((note) => `<li>${escapeHTML(note)}</li>`).join("")}</ul>` : `<p>Matches Module 010's pass standard for this scenario.</p>`}
     <p class="calib-email-status">${emailLine}</p>
-    <p>This section is now locked. Ask an admin to reopen it for another attempt.</p>
+    ${calibIdentityGateEnabled ? "<p>This section is now locked. Ask an admin to reopen it for another attempt.</p>" : ""}
   </div>`;
 }
 
@@ -1667,7 +1673,7 @@ function gradeCalibrationScenario() {
     }
   });
   if (incomplete.length) { showToast("Complete every required action, blank, and ordering step before finishing practice"); return; }
-  const identity = state.calibIdentity;
+  const identity = calibIdentityGateEnabled && state.calibIdentity ? state.calibIdentity : { initials: "DEMO", name: "Demo Tester" };
   const record = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     repInitials: identity.initials,
@@ -1683,8 +1689,10 @@ function gradeCalibrationScenario() {
   };
   state.calibResults.unshift(record);
   saveCalibResults();
-  state.calibLocks[calibLockKey(record.repInitials, record.scenarioId)] = true;
-  saveCalibLocks();
+  if (calibIdentityGateEnabled) {
+    state.calibLocks[calibLockKey(record.repInitials, record.scenarioId)] = true;
+    saveCalibLocks();
+  }
   resultHost.innerHTML = renderCalibResultPanel(record, "Sending result to jon.white@mobiledrill.net...");
   sendCalibrationResultEmail(record).then((sent) => {
     record.emailed = sent;
