@@ -47,6 +47,11 @@ const state = {
   prospectParams: { territory: "Midwest", market: "All", radius: "100", keywords: "drilling geotechnical", visual: true },
   workflowTraining: { scenarioId: "first-call", messages: [], matchedKcs: ["KC001"] },
   activeCalibrationScenario: "",
+  calibIdentity: null,
+  calibAdminUnlocked: false,
+  calibView: "scenarios",
+  calibResults: [],
+  calibLocks: {},
   rigSalesEditor: null,
   calibrationCustomerId: "",
   rigSpecModel: "B25",
@@ -198,6 +203,22 @@ const workflowTrainingScenarios = {
   },
 };
 
+const calibrationAdminPin = "2523";
+
+const calibrationReps = [
+  { initials: "JWW", name: "Jon White", isAdmin: true },
+  { initials: "MD", name: "Mike DePoy", isAdmin: false },
+  { initials: "SM", name: "Steve Morris", isAdmin: false },
+  { initials: "CO", name: "Charlie Orzeske", isAdmin: false },
+  { initials: "LO", name: "Larry Orzeske", isAdmin: true },
+  { initials: "BM", name: "Bret Myers", isAdmin: false },
+  { initials: "BS", name: "Brock Sabo", isAdmin: true },
+  { initials: "JL", name: "Jeff Lyons", isAdmin: true },
+  { initials: "BP", name: "Brandon Parks", isAdmin: false },
+  { initials: "CD", name: "Chris Duffy", isAdmin: false },
+  { initials: "TS", name: "Tim Sabo", isAdmin: true },
+];
+
 const calibrationTrainingScenarios = [
   {
     id: "normal-appointment",
@@ -205,17 +226,32 @@ const calibrationTrainingScenarios = [
     subtitle: "Baseline field workflow, no complications.",
     prompt: "Customer has one rig ready for calibration. Setup is normal — no refusal, no rapid advancement, and no failed pulse check occur.",
     items: [
-      { text: "Confirms rig, customer, borehole, driller, and tech information", correct: true },
-      { text: "Sets up the analyzer kit correctly", correct: true },
-      { text: "Enters the depth interval correctly", correct: true },
-      { text: "Measures and enters LP and LE", correct: true },
-      { text: "Confirms sensor connection", correct: true },
-      { text: "Runs the pulse check before live collection", correct: true },
-      { text: "Starts collection only after setup is ready", correct: true },
-      { text: "Records 6-inch blow counts", correct: true },
-      { text: "Ends the test properly", correct: true },
-      { text: "Completes the calibration log", correct: true },
-      { text: "Hands off data correctly", correct: true },
+      { type: "check", text: "Confirms rig, customer, borehole, driller, and tech information", correct: true },
+      { type: "check", text: "Sets up the analyzer kit correctly", correct: true },
+      { type: "check", text: "Enters the depth interval correctly", correct: true },
+      { type: "check", text: "Measures and enters LP and LE", correct: true },
+      { type: "check", text: "Confirms sensor connection", correct: true },
+      { type: "check", text: "Runs the pulse check before live collection", correct: true },
+      { type: "check", text: "Starts collection only after setup is ready", correct: true },
+      { type: "check", text: "Records 6-inch blow counts", correct: true },
+      { type: "check", text: "Ends the test properly", correct: true },
+      { type: "check", text: "Completes the calibration log", correct: true },
+      { type: "check", text: "Hands off data correctly", correct: true },
+      { type: "blank", text: "What is the standard SPT hammer drop height, in inches?", accepted: ["30", "30 inches", "thirty inches"], note: "Module 001: standard SPT hammer drop height is 30 inches." },
+      { type: "blank", text: "What is the standard slug weight used for calibration, in pounds?", accepted: ["140", "140 lb", "140 lbs", "140 pounds"], note: "Module 001: slug weight is usually 140 lb unless it's a special case." },
+      {
+        type: "order",
+        text: "Put these phases of a normal calibration appointment in the correct order.",
+        note: "Module 001 job-flow phases were not in the correct order — review the scheduling-to-handoff sequence.",
+        steps: [
+          { text: "Save and review each run before moving on", correctPosition: 5 },
+          { text: "Confirm rig/hammer setup and site readiness", correctPosition: 1 },
+          { text: "Complete the calibration log and hand off the data", correctPosition: 6 },
+          { text: "Create the data file and enter LP, LE, drop height, and slug weight", correctPosition: 2 },
+          { text: "Collect data at the required depth intervals", correctPosition: 4 },
+          { text: "Confirm sensor connection and run the pulse check", correctPosition: 3 },
+        ],
+      },
     ],
   },
   {
@@ -224,15 +260,28 @@ const calibrationTrainingScenarios = [
     subtitle: "Analyzer hardware trouble before collection starts.",
     prompt: "The pulse check does not produce the expected graph/ping.",
     items: [
-      { text: "Holds off starting live data collection until the pulse check passes", correct: true },
-      { text: "Reconnects and checks cables", correct: true },
-      { text: "Checks sensor and pigtail connections", correct: true },
-      { text: "Restarts the software completely", correct: true },
-      { text: "Replaces accelerometers/sensors with backups if needed", correct: true },
-      { text: "Reruns the pulse check before proceeding", correct: true },
-      { text: "Escalates to the office if backup sensors also fail the pulse check", correct: true },
-      { text: "Starts live data collection anyway since the hammer is already running", correct: false, note: "Retrain/retest trigger (Module 010): starting collection after a failed pulse check." },
-      { text: "Keeps guessing at the cause after backup sensors also fail, without calling the office", correct: false, note: "Retrain/retest trigger (Module 010): continuing to guess instead of escalating once backups also fail the pulse check." },
+      { type: "check", text: "Holds off starting live data collection until the pulse check passes", correct: true },
+      { type: "check", text: "Reconnects and checks cables", correct: true },
+      { type: "check", text: "Checks sensor and pigtail connections", correct: true },
+      { type: "check", text: "Restarts the software completely", correct: true },
+      { type: "check", text: "Replaces accelerometers/sensors with backups if needed", correct: true },
+      { type: "check", text: "Reruns the pulse check before proceeding", correct: true },
+      { type: "check", text: "Escalates to the office if backup sensors also fail the pulse check", correct: true },
+      { type: "check", text: "Starts live data collection anyway since the hammer is already running", correct: false, note: "Retrain/retest trigger (Module 010): starting collection after a failed pulse check." },
+      { type: "check", text: "Keeps guessing at the cause after backup sensors also fail, without calling the office", correct: false, note: "Retrain/retest trigger (Module 010): continuing to guess instead of escalating once backups also fail the pulse check." },
+      {
+        type: "order",
+        text: "Put the failed pulse-check troubleshooting steps in the correct order.",
+        note: "Module 010 troubleshooting order was wrong — cables and connections get checked before a full software restart, and backups come before escalation.",
+        steps: [
+          { text: "Escalate to the office if backup sensors also fail", correctPosition: 6 },
+          { text: "Reconnect and check cables", correctPosition: 1 },
+          { text: "Rerun the pulse check", correctPosition: 5 },
+          { text: "Check sensor and pigtail connections", correctPosition: 2 },
+          { text: "Replace accelerometers/sensors with backups if needed", correctPosition: 4 },
+          { text: "Restart the software completely", correctPosition: 3 },
+        ],
+      },
     ],
   },
   {
@@ -241,13 +290,14 @@ const calibrationTrainingScenarios = [
     subtitle: "Sampler will not advance a full interval.",
     prompt: "The sampler does not advance a full 6 inches in 50 blows.",
     items: [
-      { text: "Recognizes refusal", correct: true },
-      { text: "Records the blow count", correct: true },
-      { text: "Records actual advancement", correct: true },
-      { text: "Documents the depth interval", correct: true },
-      { text: "Communicates the issue professionally", correct: true },
-      { text: "Follows the field decision or escalation path", correct: true },
-      { text: "Treats the run as normal clean calibration data and moves on to the next depth", correct: false, note: "Module 010 pass standard: refusal data must never be treated as normal clean calibration data." },
+      { type: "check", text: "Recognizes refusal", correct: true },
+      { type: "check", text: "Records the blow count", correct: true },
+      { type: "check", text: "Records actual advancement", correct: true },
+      { type: "check", text: "Documents the depth interval", correct: true },
+      { type: "check", text: "Communicates the issue professionally", correct: true },
+      { type: "check", text: "Follows the field decision or escalation path", correct: true },
+      { type: "check", text: "Treats the run as normal clean calibration data and moves on to the next depth", correct: false, note: "Module 010 pass standard: refusal data must never be treated as normal clean calibration data." },
+      { type: "blank", text: "Refusal is the sampler not advancing a full 6 inches in how many blows?", accepted: ["50", "50 blows", "fifty blows"], note: "Module 010: refusal is defined as not advancing a full 6 inches in 50 blows." },
     ],
   },
   {
@@ -256,14 +306,14 @@ const calibrationTrainingScenarios = [
     subtitle: "Instrumented rod at risk of entering the borehole.",
     prompt: "During the first few blows, the sampler advances quickly and the instrumented rod is at risk of entering the hollow stem auger or borehole.",
     items: [
-      { text: "Watches the first 6 blows closely", correct: true },
-      { text: "Stops hammer operation before the instrumented rod enters the HSA or borehole", correct: true },
-      { text: "Protects sensors and the instrumented rod", correct: true },
-      { text: "Communicates clearly with the operator", correct: true },
-      { text: "Documents the rapid advancement", correct: true },
-      { text: "Corrects setup or selects another interval if appropriate", correct: true },
-      { text: "Escalates if damage is suspected", correct: true },
-      { text: "Lets the driller keep hammering while checking on the instrumented rod", correct: false, note: "Mandatory retrain/retest trigger (Module 010): allowing hammering to continue while the instrumented rod is at risk." },
+      { type: "check", text: "Watches the first 6 blows closely", correct: true },
+      { type: "check", text: "Stops hammer operation before the instrumented rod enters the HSA or borehole", correct: true },
+      { type: "check", text: "Protects sensors and the instrumented rod", correct: true },
+      { type: "check", text: "Communicates clearly with the operator", correct: true },
+      { type: "check", text: "Documents the rapid advancement", correct: true },
+      { type: "check", text: "Corrects setup or selects another interval if appropriate", correct: true },
+      { type: "check", text: "Escalates if damage is suspected", correct: true },
+      { type: "check", text: "Lets the driller keep hammering while checking on the instrumented rod", correct: false, note: "Mandatory retrain/retest trigger (Module 010): allowing hammering to continue while the instrumented rod is at risk." },
     ],
   },
   {
@@ -272,12 +322,13 @@ const calibrationTrainingScenarios = [
     subtitle: "Software interval doesn't match what actually happened.",
     prompt: "The trainee entered a 20.0-22.0 ft interval, but the sampler only advanced to 21.5 ft — or the 6-inch blow counts weren't recorded.",
     items: [
-      { text: "Recognizes the interval mismatch", correct: true },
-      { text: "Corrects documentation on site", correct: true },
-      { text: "Collects another proper data set if needed and possible", correct: true },
-      { text: "Records 6-inch blow counts", correct: true },
-      { text: "Documents what happened", correct: true },
-      { text: "Says the software total is close enough and skips the 6-inch increments", correct: false, note: "Mandatory retrain/retest trigger (Module 010): the software total is not enough by itself without documented 6-inch increments." },
+      { type: "check", text: "Recognizes the interval mismatch", correct: true },
+      { type: "check", text: "Corrects documentation on site", correct: true },
+      { type: "check", text: "Collects another proper data set if needed and possible", correct: true },
+      { type: "check", text: "Records 6-inch blow counts", correct: true },
+      { type: "check", text: "Documents what happened", correct: true },
+      { type: "check", text: "Says the software total is close enough and skips the 6-inch increments", correct: false, note: "Mandatory retrain/retest trigger (Module 010): the software total is not enough by itself without documented 6-inch increments." },
+      { type: "blank", text: "Blow counts must be recorded in what increment, in inches?", accepted: ["6", "6 inches", "six inches"], note: "Module 010: blow counts are recorded in 6-inch increments — the software total alone is not enough." },
     ],
   },
   {
@@ -287,14 +338,15 @@ const calibrationTrainingScenarios = [
     prompt: "Customer says: “We just need the paperwork. Can you tell us if the hammer is above 60 today and get the report sent over?”",
     approvedLanguage: "We are checking how much hammer energy is actually getting into the drill rods so your SPT blow counts can be corrected to the N60 standard and used with confidence.",
     items: [
-      { text: "Uses the approved plain-language explanation instead of calling it paperwork", correct: true },
-      { text: "Explains calibration as energy-transfer measurement", correct: true },
-      { text: "States the standard report delivery expectation (within 3 days) when appropriate", correct: true },
-      { text: "Routes the urgency to the qualified report handler", correct: true },
-      { text: "Protects data quality despite the pressure", correct: true },
-      { text: "Tells the customer the hammer is already above 60", correct: false, note: "Do-not-promise rule (Module 008): never predict a specific energy percentage before the data is reviewed." },
-      { text: "Promises the report will go out today", correct: false, note: "Do-not-promise rule (Module 008): standard delivery is 3 days unless the qualified report handler confirms otherwise." },
-      { text: "Agrees it's basically just paperwork to keep things moving", correct: false, note: "Module 008: calibration is measurement, documentation, compliance, and customer-confidence support — never “just paperwork.”" },
+      { type: "check", text: "Uses the approved plain-language explanation instead of calling it paperwork", correct: true },
+      { type: "check", text: "Explains calibration as energy-transfer measurement", correct: true },
+      { type: "check", text: "States the standard report delivery expectation (within 3 days) when appropriate", correct: true },
+      { type: "check", text: "Routes the urgency to the qualified report handler", correct: true },
+      { type: "check", text: "Protects data quality despite the pressure", correct: true },
+      { type: "check", text: "Tells the customer the hammer is already above 60", correct: false, note: "Do-not-promise rule (Module 008): never predict a specific energy percentage before the data is reviewed." },
+      { type: "check", text: "Promises the report will go out today", correct: false, note: "Do-not-promise rule (Module 008): standard delivery is 3 days unless the qualified report handler confirms otherwise." },
+      { type: "check", text: "Agrees it's basically just paperwork to keep things moving", correct: false, note: "Module 008: calibration is measurement, documentation, compliance, and customer-confidence support — never “just paperwork.”" },
+      { type: "blank", text: "In your own words, what are we actually checking during calibration? (mention energy and N60)", keywords: ["energy", "n60"], note: "Module 008 approved explanation: we're checking how much hammer energy is getting into the drill rods so blow counts can be corrected to N60." },
     ],
   },
   {
@@ -303,13 +355,14 @@ const calibrationTrainingScenarios = [
     subtitle: "Field record has a gap the report builder can't fill.",
     prompt: "Data collection is complete, but the calibration log is incomplete and the report builder can't tell what happened at one interval.",
     items: [
-      { text: "Confirms the analyzer data file exists", correct: true },
-      { text: "Confirms the calibration log is complete", correct: true },
-      { text: "Verifies depth interval, LP, LE, and blow counts", correct: true },
-      { text: "Adds field notes while the details are still fresh", correct: true },
-      { text: "Provides photos/video if the issue affected calibration data", correct: true },
-      { text: "Routes clarification to the qualified report handler", correct: true },
-      { text: "Hands off the incomplete log as-is since the analyzer data file itself is fine", correct: false, note: "Module 001/010: report builders cannot complete the package if the field record is incomplete — gaps get closed before handoff, not guessed at afterward." },
+      { type: "check", text: "Confirms the analyzer data file exists", correct: true },
+      { type: "check", text: "Confirms the calibration log is complete", correct: true },
+      { type: "check", text: "Verifies depth interval, LP, LE, and blow counts", correct: true },
+      { type: "check", text: "Adds field notes while the details are still fresh", correct: true },
+      { type: "check", text: "Provides photos/video if the issue affected calibration data", correct: true },
+      { type: "check", text: "Routes clarification to the qualified report handler", correct: true },
+      { type: "check", text: "Hands off the incomplete log as-is since the analyzer data file itself is fine", correct: false, note: "Module 001/010: report builders cannot complete the package if the field record is incomplete — gaps get closed before handoff, not guessed at afterward." },
+      { type: "blank", text: "Besides the analyzer data file, what should the tech add while the details are still fresh?", keywords: ["field", "notes"], note: "Module 001/007: field notes need to be added while details are still fresh so the report builder isn't left guessing." },
     ],
   },
   {
@@ -318,13 +371,13 @@ const calibrationTrainingScenarios = [
     subtitle: "Accelerometer vs. suspected strain gauge damage.",
     prompt: "An accelerometer appears damaged during a job. Variant: strain gauge damage is suspected.",
     items: [
-      { text: "Checks for cable or connector damage", correct: true },
-      { text: "Replaces the accelerometer with a backup if available", correct: true },
-      { text: "Reruns the pulse check before continuing", correct: true },
-      { text: "Calls the office and documents the damage", correct: true },
-      { text: "Treats any suspected strain gauge damage as an immediate stop, not field-repairable", correct: true },
-      { text: "Routes suspected strain gauge damage through the drill manager / senior authority path", correct: true },
-      { text: "Continues collecting data on a suspected damaged strain gauge without calling it in", correct: false, note: "Module 010: suspected strain gauge damage must never be treated as field-replaceable — stop and call the office immediately." },
+      { type: "check", text: "Checks for cable or connector damage", correct: true },
+      { type: "check", text: "Replaces the accelerometer with a backup if available", correct: true },
+      { type: "check", text: "Reruns the pulse check before continuing", correct: true },
+      { type: "check", text: "Calls the office and documents the damage", correct: true },
+      { type: "check", text: "Treats any suspected strain gauge damage as an immediate stop, not field-repairable", correct: true },
+      { type: "check", text: "Routes suspected strain gauge damage through the drill manager / senior authority path", correct: true },
+      { type: "check", text: "Continues collecting data on a suspected damaged strain gauge without calling it in", correct: false, note: "Module 010: suspected strain gauge damage must never be treated as field-replaceable — stop and call the office immediately." },
     ],
   },
 ];
@@ -484,6 +537,22 @@ function saveRigSalesOpportunities() {
   safeSave("mdb-demo-rig-sales-opportunities", rigSalesOpportunities);
 }
 
+function saveCalibIdentity() {
+  safeSave("mdb-demo-calib-identity", state.calibIdentity);
+}
+
+function saveCalibResults() {
+  safeSave("mdb-demo-calib-results", state.calibResults);
+}
+
+function saveCalibLocks() {
+  safeSave("mdb-demo-calib-locks", state.calibLocks);
+}
+
+function calibLockKey(repInitials, scenarioId) {
+  return `${repInitials}::${scenarioId}`;
+}
+
 let rigQuoteDbPromise;
 
 function openRigQuoteDb() {
@@ -622,6 +691,9 @@ async function loadData() {
   state.touches = safeLoad("mdb-demo-touches", {});
   state.quote = safeLoad("mdb-demo-quote", null) || newQuote();
   loadRigSalesOpportunities();
+  state.calibIdentity = safeLoad("mdb-demo-calib-identity", null);
+  state.calibResults = safeLoad("mdb-demo-calib-results", []);
+  state.calibLocks = safeLoad("mdb-demo-calib-locks", {});
   state.rigQuoteFiles = await loadRigQuoteFiles();
   state.ready = true;
   buildToolItems();
@@ -1435,7 +1507,191 @@ function renderCallListWorkspace() {
 }
 
 function renderCalibrationTrainingWorkspace() {
-  elements.overlayBody.innerHTML = `<div class="workbench training-workbench"><div class="training-intro"><span>Practice only</span><h3>Calibration Call Training</h3><p>Run the field scenario without touching a real customer, calibration record, or quote. Scored against Module 010's real pass/retrain rules.</p></div><div class="training-grid training-grid--calibration">${calibrationTrainingScenarios.map((scenario) => `<button type="button" data-training-scenario="${scenario.id}"><strong>${escapeHTML(scenario.title)}</strong><span>${escapeHTML(scenario.subtitle)}</span></button>`).join("")}</div><section id="trainingStage" class="training-stage"><strong>Select a practice scenario.</strong></section></div>`;
+  if (!state.calibIdentity) { renderCalibIdentityPicker(); return; }
+  state.calibView = "scenarios";
+  const identity = state.calibIdentity;
+  const adminActive = identity.isAdmin && state.calibAdminUnlocked;
+  elements.overlayBody.innerHTML = `<div class="workbench training-workbench">
+    <div class="training-intro"><span>Practice only</span><h3>Calibration Call Training</h3><p>Run the field scenario without touching a real customer, calibration record, or quote. Scored against Module 010's real pass/retrain rules.</p></div>
+    <div class="calib-identity-bar">
+      <span>Signed in as <strong>${escapeHTML(identity.name)} (${escapeHTML(identity.initials)})</strong></span>
+      <div class="calib-identity-actions">
+        ${identity.isAdmin ? (adminActive ? `<button type="button" class="secondary-button" data-calib-admin-console>Admin Console</button><button type="button" class="secondary-button" data-calib-lock-admin>Lock Admin Mode</button>` : `<button type="button" class="secondary-button" data-calib-unlock-admin>Unlock Admin Mode</button>`) : ""}
+        <button type="button" class="secondary-button" data-calib-switch-user>Switch User</button>
+      </div>
+    </div>
+    <div class="training-grid training-grid--calibration">${calibrationTrainingScenarios.map((scenario) => {
+      const record = latestCalibResult(identity.initials, scenario.id);
+      const locked = state.calibLocks[calibLockKey(identity.initials, scenario.id)];
+      const badge = record ? `<span class="calib-lock-badge ${locked ? "calib-lock-badge--locked" : ""}">${locked ? "Locked" : "Reopened"} · ${record.outcome}</span>` : "";
+      return `<button type="button" data-training-scenario="${scenario.id}"><strong>${escapeHTML(scenario.title)}</strong><span>${escapeHTML(scenario.subtitle)}</span>${badge}</button>`;
+    }).join("")}</div>
+    <section id="trainingStage" class="training-stage"><strong>Select a practice scenario.</strong></section>
+  </div>`;
+}
+
+function renderCalibIdentityPicker() {
+  elements.overlayBody.innerHTML = `<div class="workbench training-workbench">
+    <div class="training-intro"><span>Practice only</span><h3>Calibration Call Training</h3><p>Select your name to begin. Every result is tracked per rep and emailed to jon.white@mobiledrill.net.</p></div>
+    <div class="calib-roster-grid">${calibrationReps.map((rep) => `<button type="button" data-calib-select-rep="${rep.initials}"><strong>${escapeHTML(rep.name)}</strong><span>${escapeHTML(rep.initials)}${rep.isAdmin ? " · Admin" : ""}</span></button>`).join("")}</div>
+  </div>`;
+}
+
+function latestCalibResult(repInitials, scenarioId) {
+  return state.calibResults.find((record) => record.repInitials === repInitials && record.scenarioId === scenarioId) || null;
+}
+
+function renderCalibAdminGate() {
+  const stage = $("#trainingStage");
+  if (!stage) return;
+  stage.innerHTML = `<h3>Admin PIN</h3><p class="calib-instructions">Enter the admin PIN to unlock the Admin Console and reopen failed sections for retest.</p>
+    <div class="calib-pin-row"><input type="password" id="calibAdminPinInput" inputmode="numeric" placeholder="PIN" autocomplete="off"><button type="button" class="primary-button" data-calib-admin-pin-submit>Unlock</button></div>`;
+  $("#calibAdminPinInput")?.focus();
+}
+
+function renderAdminConsole() {
+  state.calibView = "admin";
+  const rows = state.calibResults;
+  elements.overlayBody.innerHTML = `<div class="workbench training-workbench">
+    <div class="training-intro"><span>Admin</span><h3>Calibration Training — Admin Console</h3><p>Every submission across every rep. Add notes, set the final decision, and reopen a locked section for retest.</p></div>
+    <div class="calib-identity-bar"><span>Signed in as <strong>${escapeHTML(state.calibIdentity.name)}</strong> · Admin Mode</span><div class="calib-identity-actions"><button type="button" class="secondary-button" data-calib-back-to-scenarios>Back to Scenarios</button></div></div>
+    ${rows.length ? `<div class="table-scroll"><table class="data-table calib-admin-table"><thead><tr><th>Rep</th><th>Scenario</th><th>Submitted</th><th>Auto result</th><th>Missed items</th><th>Emailed</th><th>Admin decision</th><th>Admin notes</th><th>Lock</th></tr></thead><tbody>${rows.map((record) => `<tr>
+      <td>${escapeHTML(record.repName)} (${escapeHTML(record.repInitials)})</td>
+      <td>${escapeHTML(record.scenarioTitle)}</td>
+      <td>${new Date(record.timestamp).toLocaleString()}</td>
+      <td><span class="status-label ${record.outcome === "PASS" ? "status-label--good" : "status-label--warn"}">${record.outcome}</span></td>
+      <td>${record.missed.length ? `<ul>${record.missed.map((note) => `<li>${escapeHTML(note)}</li>`).join("")}</ul>` : "None"}</td>
+      <td>${record.emailed ? "Yes" : "Not sent"}</td>
+      <td><select data-calib-admin-decision="${record.id}">${["Not reviewed", "Continue supervised training", "Retrain / retest required", "Approved for solo service appointments"].map((option) => `<option ${option === record.adminDecision ? "selected" : ""}>${option}</option>`).join("")}</select></td>
+      <td><textarea rows="2" data-calib-admin-notes="${record.id}" placeholder="Notes...">${escapeHTML(record.adminNotes)}</textarea></td>
+      <td>${state.calibLocks[calibLockKey(record.repInitials, record.scenarioId)] ? `<button type="button" class="table-button" data-calib-reopen="${calibLockKey(record.repInitials, record.scenarioId)}">Reopen</button>` : "Open"}</td>
+    </tr>`).join("")}</tbody></table></div>` : "<p>No results submitted yet.</p>"}
+  </div>`;
+}
+
+function renderTrainingScenario(id) {
+  const stage = $("#trainingStage");
+  if (!stage) return;
+  const scenario = calibrationTrainingScenarios.find((item) => item.id === id);
+  if (!scenario) { stage.innerHTML = "<strong>Select a practice scenario.</strong>"; return; }
+  state.activeCalibrationScenario = id;
+  const identity = state.calibIdentity;
+  const locked = state.calibLocks[calibLockKey(identity.initials, scenario.id)];
+  if (locked) {
+    const record = latestCalibResult(identity.initials, scenario.id);
+    stage.innerHTML = `<span class="status-label status-label--warn">Locked</span><h3>${escapeHTML(scenario.prompt)}</h3>
+      <div class="calib-result ${record?.outcome === "PASS" ? "calib-result--pass" : "calib-result--retrain"}">
+        <span class="status-label ${record?.outcome === "PASS" ? "status-label--good" : "status-label--warn"}">${escapeHTML(record?.outcome || "")}</span>
+        <p>Submitted ${record ? new Date(record.timestamp).toLocaleString() : ""}. Admin decision: ${escapeHTML(record?.adminDecision || "Not reviewed")}.</p>
+        ${record?.missed.length ? `<ul>${record.missed.map((note) => `<li>${escapeHTML(note)}</li>`).join("")}</ul>` : ""}
+        <p>Ask an admin to reopen this section for another attempt.</p>
+      </div>`;
+    return;
+  }
+  stage.innerHTML = `<span class="status-label">Active practice</span><h3>${escapeHTML(scenario.prompt)}</h3>
+    ${scenario.approvedLanguage ? `<div class="calib-approved-language"><strong>Approved field explanation</strong><p>“${escapeHTML(scenario.approvedLanguage)}”</p></div>` : ""}
+    <p class="calib-instructions">Check every action the trainee should take, fill in any blanks, and put any workflow steps in order. This locks after one submission — an admin has to reopen it for a retest.</p>
+    <ol class="calib-checklist">${scenario.items.map((item, index) => renderCalibItem(item, index)).join("")}</ol>
+    <button type="button" class="primary-button" data-complete-training>Complete Practice</button>
+    <div id="trainingResult"></div>`;
+}
+
+function renderCalibItem(item, index) {
+  if (item.type === "blank") {
+    return `<li class="calib-blank"><label>${escapeHTML(item.text)}<input type="text" data-calib-item="${index}" data-calib-type="blank" autocomplete="off"></label></li>`;
+  }
+  if (item.type === "order") {
+    return `<li class="calib-order"><p>${escapeHTML(item.text)}</p><ol class="calib-order-steps">${item.steps.map((step, stepIndex) => `<li>${escapeHTML(step.text)} <select data-calib-item="${index}" data-calib-step="${stepIndex}"><option value="">#</option>${item.steps.map((_, position) => `<option value="${position + 1}">${position + 1}</option>`).join("")}</select></li>`).join("")}</ol></li>`;
+  }
+  return `<li><label><input type="checkbox" data-calib-item="${index}"> ${escapeHTML(item.text)}</label></li>`;
+}
+
+function renderCalibResultPanel(record, statusNote) {
+  const emailLine = statusNote || (record.emailed
+    ? "Emailed to jon.white@mobiledrill.net."
+    : "Not emailed yet — email sending isn't configured (needs a Netlify env var). Result is saved and visible in the Admin Console.");
+  return `<div class="calib-result ${record.outcome === "PASS" ? "calib-result--pass" : "calib-result--retrain"}">
+    <span class="status-label ${record.outcome === "PASS" ? "status-label--good" : "status-label--warn"}">${record.outcome === "PASS" ? "Pass" : "Retrain / retest required"}</span>
+    ${record.missed.length ? `<ul>${record.missed.map((note) => `<li>${escapeHTML(note)}</li>`).join("")}</ul>` : `<p>Matches Module 010's pass standard for this scenario.</p>`}
+    <p class="calib-email-status">${emailLine}</p>
+    <p>This section is now locked. Ask an admin to reopen it for another attempt.</p>
+  </div>`;
+}
+
+async function sendCalibrationResultEmail(record) {
+  try {
+    const response = await fetch("/.netlify/functions/send-calibration-result", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        repName: record.repName,
+        repInitials: record.repInitials,
+        scenarioTitle: record.scenarioTitle,
+        outcome: record.outcome,
+        missed: record.missed,
+        timestamp: record.timestamp,
+      }),
+    });
+    if (!response.ok) return false;
+    const data = await response.json().catch(() => ({}));
+    return Boolean(data.sent);
+  } catch {
+    return false;
+  }
+}
+
+function gradeCalibrationScenario() {
+  const scenario = calibrationTrainingScenarios.find((item) => item.id === state.activeCalibrationScenario);
+  const resultHost = $("#trainingResult");
+  if (!scenario || !resultHost) return;
+  const incomplete = [];
+  const missedNotes = [];
+  scenario.items.forEach((item, index) => {
+    if (item.type === "blank") {
+      const input = $(`[data-calib-item="${index}"][data-calib-type="blank"]`);
+      const value = normalize(input?.value || "");
+      if (!value) { incomplete.push(item.text); return; }
+      const passes = item.keywords
+        ? item.keywords.every((word) => value.includes(normalize(word)))
+        : (item.accepted || []).some((answer) => value.includes(normalize(answer)));
+      if (!passes) missedNotes.push(item.note || `Incorrect answer: “${item.text}”`);
+    } else if (item.type === "order") {
+      const selects = $$(`[data-calib-item="${index}"][data-calib-step]`).sort((a, b) => Number(a.dataset.calibStep) - Number(b.dataset.calibStep));
+      if (selects.some((select) => !select.value)) { incomplete.push(item.text); return; }
+      const correct = item.steps.every((step, stepIndex) => Number(selects[stepIndex].value) === step.correctPosition);
+      if (!correct) missedNotes.push(item.note || `Steps were not in the correct order: “${item.text}”`);
+    } else {
+      const checkbox = $(`[data-calib-item="${index}"]`);
+      if (item.correct && !checkbox?.checked) { incomplete.push(item.text); return; }
+      if (!item.correct && checkbox?.checked) missedNotes.push(item.note || item.text);
+    }
+  });
+  if (incomplete.length) { showToast("Complete every required action, blank, and ordering step before finishing practice"); return; }
+  const identity = state.calibIdentity;
+  const record = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    repInitials: identity.initials,
+    repName: identity.name,
+    scenarioId: scenario.id,
+    scenarioTitle: scenario.title,
+    outcome: missedNotes.length ? "RETRAIN" : "PASS",
+    missed: missedNotes,
+    timestamp: new Date().toISOString(),
+    adminDecision: "Not reviewed",
+    adminNotes: "",
+    emailed: false,
+  };
+  state.calibResults.unshift(record);
+  saveCalibResults();
+  state.calibLocks[calibLockKey(record.repInitials, record.scenarioId)] = true;
+  saveCalibLocks();
+  resultHost.innerHTML = renderCalibResultPanel(record, "Sending result to jon.white@mobiledrill.net...");
+  sendCalibrationResultEmail(record).then((sent) => {
+    record.emailed = sent;
+    saveCalibResults();
+    const host = $("#trainingResult");
+    if (host) host.innerHTML = renderCalibResultPanel(record);
+  });
 }
 
 function renderWorkflowTrainingWorkspace() {
@@ -1545,35 +1801,6 @@ function runWorkflowTrainingTurn(value) {
   $("#workflowChatInput")?.focus({ preventScroll: true });
 }
 
-function renderTrainingScenario(id) {
-  const stage = $("#trainingStage");
-  if (!stage) return;
-  const scenario = calibrationTrainingScenarios.find((item) => item.id === id);
-  if (!scenario) { stage.innerHTML = "<strong>Select a practice scenario.</strong>"; return; }
-  state.activeCalibrationScenario = id;
-  stage.innerHTML = `<span class="status-label">Active practice</span><h3>${escapeHTML(scenario.prompt)}</h3>
-    ${scenario.approvedLanguage ? `<div class="calib-approved-language"><strong>Approved field explanation</strong><p>“${escapeHTML(scenario.approvedLanguage)}”</p></div>` : ""}
-    <p class="calib-instructions">Check every action the trainee should take. Leave anything the trainee should not do unchecked.</p>
-    <ol class="calib-checklist">${scenario.items.map((item, index) => `<li><label><input type="checkbox" data-calib-item="${index}"> ${escapeHTML(item.text)}</label></li>`).join("")}</ol>
-    <button type="button" class="primary-button" data-complete-training>Complete Practice</button>
-    <div id="trainingResult"></div>`;
-}
-
-function gradeCalibrationScenario() {
-  const scenario = calibrationTrainingScenarios.find((item) => item.id === state.activeCalibrationScenario);
-  const resultHost = $("#trainingResult");
-  if (!scenario || !resultHost) return;
-  const checkedIndexes = new Set($$("#trainingStage [data-calib-item]").filter((input) => input.checked).map((input) => Number(input.dataset.calibItem)));
-  const missedRequired = scenario.items.filter((item, index) => item.correct && !checkedIndexes.has(index));
-  if (missedRequired.length) { showToast("Check every required action before completing practice"); return; }
-  const trippedTraps = scenario.items.filter((item, index) => !item.correct && checkedIndexes.has(index));
-  if (trippedTraps.length) {
-    resultHost.innerHTML = `<div class="calib-result calib-result--retrain"><span class="status-label status-label--warn">Retrain / retest required</span><ul>${trippedTraps.map((item) => `<li>${escapeHTML(item.note || item.text)}</li>`).join("")}</ul></div>`;
-  } else {
-    resultHost.innerHTML = `<div class="calib-result calib-result--pass"><span class="status-label status-label--good">Pass</span><p>Matches Module 010's pass standard for this scenario. No operational records changed.</p></div>`;
-  }
-}
-
 function handleOverlayInput(event) {
   const target = event.target;
   if (target.id === "toolSearch") {
@@ -1628,6 +1855,10 @@ function handleOverlayInput(event) {
     safeSave("mdb-demo-quote", state.quote);
     updateQuoteNumbers();
   }
+  if (target.matches("[data-calib-admin-notes]")) {
+    const record = state.calibResults.find((item) => item.id === target.dataset.calibAdminNotes);
+    if (record) { record.adminNotes = target.value; saveCalibResults(); }
+  }
 }
 
 elements.overlayBody.addEventListener("input", handleOverlayInput);
@@ -1636,6 +1867,10 @@ elements.overlayBody.addEventListener("change", async (event) => {
   const target = event.target;
   if (target.id === "bomRigSelect") { state.bom.serial = target.value; state.bom.section = ""; state.bom.selectedPart = ""; renderBomWorkspace(); }
   if (target.id === "calibrationCustomerSelect") { state.calibrationCustomerId = target.value; renderCalibrationWorkspace(); }
+  if (target.matches("[data-calib-admin-decision]")) {
+    const record = state.calibResults.find((item) => item.id === target.dataset.calibAdminDecision);
+    if (record) { record.adminDecision = target.value; saveCalibResults(); }
+  }
   if (target.matches("[data-rig-stage]")) { rigSalesOpportunities[Number(target.dataset.rigStage)].stage = target.value; saveRigSalesOpportunities(); renderRigSalesWorkspace(); }
   if (target.matches("[data-rig-quote-upload]")) {
     const file = target.files?.[0];
@@ -1724,6 +1959,25 @@ elements.overlayBody.addEventListener("click", (event) => {
   const trainingScenario = event.target.closest("[data-training-scenario]");
   if (trainingScenario) { renderTrainingScenario(trainingScenario.dataset.trainingScenario); return; }
   if (event.target.closest("[data-complete-training]")) { gradeCalibrationScenario(); return; }
+  const calibSelectRep = event.target.closest("[data-calib-select-rep]");
+  if (calibSelectRep) {
+    const rep = calibrationReps.find((item) => item.initials === calibSelectRep.dataset.calibSelectRep);
+    if (rep) { state.calibIdentity = { ...rep }; state.calibAdminUnlocked = false; saveCalibIdentity(); renderCalibrationTrainingWorkspace(); }
+    return;
+  }
+  if (event.target.closest("[data-calib-switch-user]")) { state.calibIdentity = null; state.calibAdminUnlocked = false; saveCalibIdentity(); renderCalibrationTrainingWorkspace(); return; }
+  if (event.target.closest("[data-calib-unlock-admin]")) { renderCalibAdminGate(); return; }
+  if (event.target.closest("[data-calib-admin-pin-submit]")) {
+    const pinValue = $("#calibAdminPinInput")?.value || "";
+    if (pinValue === calibrationAdminPin) { state.calibAdminUnlocked = true; renderCalibrationTrainingWorkspace(); showToast("Admin Mode unlocked"); }
+    else showToast("Incorrect PIN");
+    return;
+  }
+  if (event.target.closest("[data-calib-lock-admin]")) { state.calibAdminUnlocked = false; renderCalibrationTrainingWorkspace(); return; }
+  if (event.target.closest("[data-calib-admin-console]")) { renderAdminConsole(); return; }
+  if (event.target.closest("[data-calib-back-to-scenarios]")) { renderCalibrationTrainingWorkspace(); return; }
+  const calibReopen = event.target.closest("[data-calib-reopen]");
+  if (calibReopen) { delete state.calibLocks[calibReopen.dataset.calibReopen]; saveCalibLocks(); renderAdminConsole(); showToast("Section reopened for retest"); return; }
   if (event.target.closest("#browseToolingButton")) {
     const toolState = activeToolingState();
     toolState.browseOpen = !toolState.browseOpen;

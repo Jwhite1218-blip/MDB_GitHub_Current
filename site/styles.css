@@ -3017,6 +3017,153 @@ button:disabled {
   border-color: #f0d895;
 }
 
+.calib-email-status {
+  font-style: italic;
+  color: var(--ink-soft);
+}
+
+.calib-identity-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 13px;
+  margin-bottom: 12px;
+  color: var(--ink);
+  background: var(--white);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  font-size: 0.78rem;
+}
+
+.calib-identity-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.calib-roster-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.calib-roster-grid button {
+  padding: 14px;
+  color: var(--ink);
+  text-align: left;
+  background: var(--white);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+}
+
+.calib-roster-grid button:hover {
+  border-color: var(--speedway-blue);
+  box-shadow: var(--shadow-small);
+}
+
+.calib-roster-grid strong {
+  display: block;
+}
+
+.calib-roster-grid span {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+}
+
+.calib-lock-badge {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 7px;
+  color: var(--mobile-drill-blue-dark);
+  background: var(--speedway-blue-pale);
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.calib-lock-badge--locked {
+  color: var(--warning);
+  background: var(--warning-pale);
+}
+
+.calib-pin-row {
+  display: flex;
+  gap: 8px;
+  max-width: 260px;
+}
+
+.calib-pin-row input {
+  flex: 1;
+  padding: 9px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+}
+
+.calib-blank {
+  display: block;
+}
+
+.calib-blank label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.calib-blank input {
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+}
+
+.calib-order {
+  display: block;
+}
+
+.calib-order > p {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+
+.calib-order-steps {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.calib-order-steps select {
+  margin-left: 8px;
+  padding: 3px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+}
+
+.calib-admin-table textarea {
+  width: 180px;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  font-size: 0.7rem;
+}
+
+.calib-admin-table select {
+  padding: 5px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  font-size: 0.7rem;
+}
+
+.calib-admin-table ul {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 0.68rem;
+}
+
 .training-workbench--chat {
   display: grid;
   gap: 12px;
