@@ -8,8 +8,8 @@
       content="Mobile Drill Brain operational workspace demo."
     >
     <title>Mobile Drill Brain</title>
-    <link rel="stylesheet" href="styles.css?v=20260815-1">
-    <script src="app.js?v=20260815-1" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260815-2">
+    <script src="app.js?v=20260815-2" defer></script>
   </head>
 
   <body>
@@ -24,7 +24,10 @@
           alt="Mobile Drill International"
         >
       </button>
-      <span class="demo-pill">MDB Demo</span>
+      <div class="app-banner-actions">
+        <button id="advancedSearchButton" class="advanced-search-trigger" type="button">Advanced Search</button>
+        <span class="demo-pill">MDB Demo</span>
+      </div>
     </header>
 
     <nav id="workspaceNav" class="workspace-nav" aria-label="MDB workspaces">
@@ -188,6 +191,41 @@
       </header>
       <div id="overlayBody" class="overlay-body"></div>
     </section>
+
+    <div id="advancedSearchModal" class="advanced-search-modal" hidden>
+      <div class="advanced-search-panel" role="dialog" aria-modal="true" aria-label="Advanced search">
+        <header>
+          <h2>Advanced Search</h2>
+          <button id="advancedSearchClose" class="close-button" type="button" aria-label="Close advanced search">&#215;</button>
+        </header>
+        <div class="advanced-search-fields">
+          <label><span>Search under</span>
+            <select id="advSearchType">
+              <option value="tooling">Tooling</option>
+              <option value="rig">Rig Parts</option>
+            </select>
+          </label>
+          <label><span>Field</span>
+            <select id="advSearchField">
+              <option value="description">Description</option>
+              <option value="part">Part Number</option>
+            </select>
+          </label>
+          <label><span>Condition</span>
+            <select id="advSearchOperator">
+              <option value="contains" selected>Contains</option>
+              <option value="is">Is</option>
+              <option value="isNot">Is Not</option>
+              <option value="beginsWith">Begins With</option>
+            </select>
+          </label>
+          <label><span>Value</span>
+            <input id="advSearchValue" type="text" autocomplete="off" spellcheck="false" placeholder="2 key, 3.25, rods, awj...">
+          </label>
+        </div>
+        <div id="advSearchResults" class="advanced-search-results"><p class="advanced-search-empty">Enter a value to search.</p></div>
+      </div>
+    </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   </body>

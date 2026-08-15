@@ -27,6 +27,9 @@ const elements = {
   overlayTitle: $("#overlayTitle"),
   overlayBody: $("#overlayBody"),
   toast: $("#toast"),
+  advancedSearchButton: $("#advancedSearchButton"),
+  advancedSearchModal: $("#advancedSearchModal"),
+  advancedSearchClose: $("#advancedSearchClose"),
 };
 
 const state = {
@@ -52,6 +55,8 @@ const state = {
   calibView: "scenarios",
   calibResults: [],
   calibLocks: {},
+  advancedSearch: { type: "tooling", field: "description", operator: "contains", value: "" },
+  advSearchTimer: null,
   rigSalesEditor: null,
   calibrationCustomerId: "",
   rigSpecModel: "B25",
@@ -955,6 +960,46 @@ function closeWorkspace() {
   elements.workspaceOverlay.classList.remove("workspace-overlay--customer-tooling");
   elements.overlayBody.innerHTML = "";
   setActiveNav(state.activeView === "customer" ? "customer" : "home");
+}
+
+function openAdvancedSearch() {
+  if (!state.ready) { showToast("MDB data is still loading."); return; }
+  elements.advancedSearchModal.hidden = false;
+  renderAdvancedSearchResults();
+  $("#advSearchValue")?.focus();
+}
+
+function closeAdvancedSearch() {
+  elements.advancedSearchModal.hidden = true;
+}
+
+function matchesOperator(fieldValue, operator, searchValue) {
+  const clean = normalize(fieldValue);
+  const cleanSearch = normalize(searchValue);
+  if (operator === "is") return clean === cleanSearch;
+  if (operator === "isNot") return clean !== cleanSearch;
+  if (operator === "beginsWith") return clean.startsWith(cleanSearch);
+  return clean.includes(cleanSearch);
+}
+
+function advancedSearchResults() {
+  const { type, field, operator, value } = state.advancedSearch;
+  if (!value.trim()) return [];
+  const source = type === "rig"
+    ? state.data.rig.items.map((item) => ({ part: item.part, description: item.cleanDescription || item.description, family: item.domain, kind: "rig" }))
+    : state.toolItems.map((item) => ({ part: item.part, description: item.description, family: item.family, kind: "tooling", toolId: item.id }));
+  const fieldGetter = field === "part" ? (item) => item.part : (item) => item.description;
+  return source.filter((item) => fieldGetter(item) && matchesOperator(fieldGetter(item), operator, value)).slice(0, 60);
+}
+
+function renderAdvancedSearchResults() {
+  const host = $("#advSearchResults");
+  if (!host) return;
+  const { value } = state.advancedSearch;
+  if (!value.trim()) { host.innerHTML = '<p class="advanced-search-empty">Enter a value to search.</p>'; return; }
+  const results = advancedSearchResults();
+  if (!results.length) { host.innerHTML = '<p class="advanced-search-empty">No matches.</p>'; return; }
+  host.innerHTML = `<div class="advanced-search-count">${results.length} match${results.length === 1 ? "" : "es"}${results.length === 60 ? " (showing first 60)" : ""}</div>${results.map((item) => `<button type="button" class="advanced-search-result" data-adv-result-kind="${item.kind}" data-adv-result-part="${escapeHTML(item.part || "")}" data-adv-result-tool-id="${escapeHTML(item.toolId || "")}"><strong>${escapeHTML(item.part || "No active PN")}</strong><span>${escapeHTML(item.description || "")}</span></button>`).join("")}`;
 }
 
 function detectBuilder(query) {
@@ -2019,6 +2064,27 @@ elements.customerBackButton.addEventListener("click", showHome);
 elements.overlayBackButton.addEventListener("click", closeWorkspace);
 elements.overlayCloseButton.addEventListener("click", closeWorkspace);
 
+elements.advancedSearchButton.addEventListener("click", openAdvancedSearch);
+elements.advancedSearchClose.addEventListener("click", closeAdvancedSearch);
+elements.advancedSearchModal.addEventListener("click", (event) => {
+  if (event.target === elements.advancedSearchModal) closeAdvancedSearch();
+});
+$("#advSearchType").addEventListener("change", (event) => { state.advancedSearch.type = event.target.value; renderAdvancedSearchResults(); });
+$("#advSearchField").addEventListener("change", (event) => { state.advancedSearch.field = event.target.value; renderAdvancedSearchResults(); });
+$("#advSearchOperator").addEventListener("change", (event) => { state.advancedSearch.operator = event.target.value; renderAdvancedSearchResults(); });
+$("#advSearchValue").addEventListener("input", (event) => {
+  state.advancedSearch.value = event.target.value;
+  clearTimeout(state.advSearchTimer);
+  state.advSearchTimer = setTimeout(renderAdvancedSearchResults, 90);
+});
+$("#advSearchResults").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-adv-result-kind]");
+  if (!button) return;
+  closeAdvancedSearch();
+  if (button.dataset.advResultKind === "rig") openWorkspace("bom", { part: button.dataset.advResultPart });
+  else openWorkspace("tooling", { toolId: button.dataset.advResultToolId });
+});
+
 function navigateWorkspace(type) {
   if (type === "home") showHome();
   else if (type === "customer") openCustomerWorkspace();
@@ -2090,7 +2156,8 @@ elements.calibrationButton.addEventListener("click", () => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
-    if (!elements.workspaceOverlay.hidden) closeWorkspace();
+    if (!elements.advancedSearchModal.hidden) closeAdvancedSearch();
+    else if (!elements.workspaceOverlay.hidden) closeWorkspace();
     else { hideSearchResults(elements.globalSearchResults, elements.globalSearchInput); hideSearchResults(elements.customerSearchResults, elements.customerSearchInput); }
   }
 });
