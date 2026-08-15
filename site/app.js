@@ -1817,7 +1817,6 @@ function handleOverlayInput(event) {
     clearTimeout(state.searchTimer);
     state.searchTimer = setTimeout(() => {
       const detected = detectBuilder(toolState.query);
-      toolState.scope = "All";
       toolState.selectedId = "";
       if (detected !== toolState.builder) { toolState.builder = detected; toolState.filters = {}; }
       updateToolingModeSurface();
