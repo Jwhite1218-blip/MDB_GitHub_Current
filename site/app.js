@@ -96,6 +96,9 @@ const state = {
   searchTimer: null,
   reports: null,
   reportsLoading: false,
+  knownCustomers: [],
+  knownCustomersConfigured: false,
+  knownCustomersLoaded: false,
 };
 
 const purchaseTemplates = [
@@ -191,16 +194,16 @@ const rigSalesOpportunities = [
 ];
 
 const prospectCandidates = [
-  { company: "GeoDynamics Inc.", territory: "Midwest", state: "Indiana", market: "Geotechnical", distance: 24, tags: "drilling geotechnical spt soil boring", domain: "geodynamics.example.invalid", matchCustomerId: "geodynamics-inc", accountCheck: "Exact customer-name and domain match", equipment: "Truck-mounted drill rig observed", possibleModel: "Mobile Drill B57", confidence: "High", evidence: "Fleet page image with Mobile Drill decal", ownership: "Ownership unconfirmed" },
-  { company: "Vertex Geo Services", territory: "Midwest", state: "Indiana", market: "Environmental", distance: 63, tags: "drilling environmental geotechnical sampling", domain: "vertexgeo.example.invalid", likelyCustomerId: "vertex-geoscience", accountCheck: "Name, market, and territory overlap — review alias or branch", equipment: "Drill operation indicated", possibleModel: "Make/model unclear", confidence: "Medium", evidence: "Project gallery image", ownership: "Ownership unconfirmed" },
-  { company: "Midwest Subsurface Group", territory: "Midwest", state: "Indiana", market: "Geotechnical", distance: 88, tags: "drilling geotechnical spt subsurface", domain: "midwestsubsurface.example.invalid", accountCheck: "No customer, alias, domain, phone, address, or purchase-history match", equipment: "Two drill rigs observed", possibleModel: "Possible B57 and crawler rig", confidence: "Medium", evidence: "Public equipment gallery", ownership: "Ownership unconfirmed" },
-  { company: "Buckeye Soil & Core", territory: "Midwest", state: "Ohio", market: "Geotechnical", distance: 141, tags: "drilling geotechnical soil core", domain: "buckeyesoil.example.invalid", accountCheck: "No customer, alias, domain, phone, address, or purchase-history match", equipment: "Drilling equipment observed", possibleModel: "Brand unknown", confidence: "Low", evidence: "Homepage project image", ownership: "Ownership unconfirmed" },
-  { company: "River Valley Environmental", territory: "Southeast", state: "Kentucky", market: "Environmental", distance: 176, tags: "drilling environmental sampling", domain: "rivervalleyenv.example.invalid", accountCheck: "No customer, alias, domain, phone, address, or purchase-history match", equipment: "No equipment visible", possibleModel: "None identified", confidence: "Low", evidence: "No qualifying public image", ownership: "Not established" },
-  { company: "Great Lakes Test Borings", territory: "Midwest", state: "Michigan", market: "Geotechnical", distance: 232, tags: "drilling geotechnical test boring spt", domain: "greatlakestest.example.invalid", accountCheck: "No customer, alias, domain, phone, address, or purchase-history match", equipment: "Mobile Drill equipment observed", possibleModel: "Possible B37X", confidence: "Medium", evidence: "Services page image and visible mast decal", ownership: "Ownership unconfirmed" },
-  { company: "New England Geo Drilling", territory: "Northeast", state: "Massachusetts", market: "Geotechnical", distance: 72, tags: "drilling geotechnical spt soil boring", domain: "newenglandgeo.example.invalid", accountCheck: "No customer, alias, domain, phone, address, or purchase-history match", equipment: "Truck-mounted drill observed", possibleModel: "Brand unclear", confidence: "Low", evidence: "Public project gallery", ownership: "Ownership unconfirmed" },
-  { company: "Carolina Site Testing", territory: "Southeast", state: "North Carolina", market: "Geotechnical", distance: 94, tags: "drilling geotechnical site testing spt", domain: "carolinasite.example.invalid", accountCheck: "No customer, alias, domain, phone, address, or purchase-history match", equipment: "Two geotechnical rigs observed", possibleModel: "Possible Mobile Drill equipment", confidence: "Medium", evidence: "Fleet page images", ownership: "Ownership unconfirmed" },
-  { company: "Desert Core Services", territory: "Southwest", state: "Arizona", market: "Environmental", distance: 81, tags: "drilling environmental geotechnical coring", domain: "desertcore.example.invalid", accountCheck: "No customer, alias, domain, phone, address, or purchase-history match", equipment: "Crawler drill observed", possibleModel: "Brand unclear", confidence: "Low", evidence: "Services page image", ownership: "Ownership unconfirmed" },
-  { company: "Pacific Geo Borings", territory: "West", state: "California", market: "Geotechnical", distance: 67, tags: "drilling geotechnical test boring spt", domain: "pacificgeo.example.invalid", accountCheck: "No customer, alias, domain, phone, address, or purchase-history match", equipment: "Mobile Drill mast decal observed", possibleModel: "Possible B37X", confidence: "Medium", evidence: "Public project photo", ownership: "Ownership unconfirmed" },
+  { company: "GeoDynamics Inc.", territory: "Midwest", state: "Indiana", market: "Geotechnical", distance: 24, tags: "drilling geotechnical spt soil boring", domain: "geodynamics.example.invalid", equipment: "Truck-mounted drill rig observed", possibleModel: "Mobile Drill B57", confidence: "High", evidence: "Fleet page image with Mobile Drill decal", ownership: "Ownership unconfirmed" },
+  { company: "Vertex Geo Services", territory: "Midwest", state: "Indiana", market: "Environmental", distance: 63, tags: "drilling environmental geotechnical sampling", domain: "vertexgeo.example.invalid", equipment: "Drill operation indicated", possibleModel: "Make/model unclear", confidence: "Medium", evidence: "Project gallery image", ownership: "Ownership unconfirmed" },
+  { company: "Midwest Subsurface Group", territory: "Midwest", state: "Indiana", market: "Geotechnical", distance: 88, tags: "drilling geotechnical spt subsurface", domain: "midwestsubsurface.example.invalid", equipment: "Two drill rigs observed", possibleModel: "Possible B57 and crawler rig", confidence: "Medium", evidence: "Public equipment gallery", ownership: "Ownership unconfirmed" },
+  { company: "Buckeye Soil & Core", territory: "Midwest", state: "Ohio", market: "Geotechnical", distance: 141, tags: "drilling geotechnical soil core", domain: "buckeyesoil.example.invalid", equipment: "Drilling equipment observed", possibleModel: "Brand unknown", confidence: "Low", evidence: "Homepage project image", ownership: "Ownership unconfirmed" },
+  { company: "River Valley Environmental", territory: "Southeast", state: "Kentucky", market: "Environmental", distance: 176, tags: "drilling environmental sampling", domain: "rivervalleyenv.example.invalid", equipment: "No equipment visible", possibleModel: "None identified", confidence: "Low", evidence: "No qualifying public image", ownership: "Not established" },
+  { company: "Great Lakes Test Borings", territory: "Midwest", state: "Michigan", market: "Geotechnical", distance: 232, tags: "drilling geotechnical test boring spt", domain: "greatlakestest.example.invalid", equipment: "Mobile Drill equipment observed", possibleModel: "Possible B37X", confidence: "Medium", evidence: "Services page image and visible mast decal", ownership: "Ownership unconfirmed" },
+  { company: "New England Geo Drilling", territory: "Northeast", state: "Massachusetts", market: "Geotechnical", distance: 72, tags: "drilling geotechnical spt soil boring", domain: "newenglandgeo.example.invalid", equipment: "Truck-mounted drill observed", possibleModel: "Brand unclear", confidence: "Low", evidence: "Public project gallery", ownership: "Ownership unconfirmed" },
+  { company: "Carolina Site Testing", territory: "Southeast", state: "North Carolina", market: "Geotechnical", distance: 94, tags: "drilling geotechnical site testing spt", domain: "carolinasite.example.invalid", equipment: "Two geotechnical rigs observed", possibleModel: "Possible Mobile Drill equipment", confidence: "Medium", evidence: "Fleet page images", ownership: "Ownership unconfirmed" },
+  { company: "Desert Core Services", territory: "Southwest", state: "Arizona", market: "Environmental", distance: 81, tags: "drilling environmental geotechnical coring", domain: "desertcore.example.invalid", equipment: "Crawler drill observed", possibleModel: "Brand unclear", confidence: "Low", evidence: "Services page image", ownership: "Ownership unconfirmed" },
+  { company: "Pacific Geo Borings", territory: "West", state: "California", market: "Geotechnical", distance: 67, tags: "drilling geotechnical test boring spt", domain: "pacificgeo.example.invalid", equipment: "Mobile Drill mast decal observed", possibleModel: "Possible B37X", confidence: "Medium", evidence: "Public project photo", ownership: "Ownership unconfirmed" },
 ];
 
 const kcTrainingKnowledge = [
@@ -1247,7 +1250,7 @@ function openWorkspace(type, options = {}) {
   if (type === "rigSpecs") renderRigSpecsWorkspace(options);
   if (type === "calibration") renderCalibrationWorkspace();
   if (type === "rigSales") renderRigSalesWorkspace();
-  if (type === "prospects") renderProspectWorkspace();
+  if (type === "prospects") { renderProspectWorkspace(); loadKnownCustomers().then(() => { if (state.activeWorkspace === "prospects") renderProspectResults(); }); }
   if (type === "callList") renderCallListWorkspace();
   if (type === "calibrationTraining") renderCalibrationTrainingWorkspace();
   if (type === "workflowTraining") renderWorkflowTrainingWorkspace();
@@ -2221,34 +2224,64 @@ function renderRigQuoteFileCell(opportunity) {
   return `<div class="quote-file-cell quote-file-cell--attached"><div><button type="button" class="table-button" data-rig-quote-view="${escapeHTML(opportunity.id)}">View</button>${upload}</div><small title="${escapeHTML(attachment.name)}">${escapeHTML(attachment.name)} · ${formatFileSize(attachment.size)}</small></div>`;
 }
 
-function prospectStatus(candidate) {
-  if (candidate.matchCustomerId) return ["Existing Customer", "status-label--good"];
-  if (candidate.likelyCustomerId) return ["Likely Duplicate", "status-label--warn"];
-  return ["New Prospect", ""];
+async function loadKnownCustomers() {
+  try {
+    const response = await fetch("/.netlify/functions/known-customers-list");
+    if (response.ok) {
+      const data = await response.json();
+      state.knownCustomers = data.customers || [];
+      state.knownCustomersConfigured = Boolean(data.configured);
+      state.knownCustomersLoaded = true;
+      return;
+    }
+  } catch {
+    // backend unreachable
+  }
+  state.knownCustomers = [];
+  state.knownCustomersConfigured = false;
+  state.knownCustomersLoaded = true;
+}
+
+function prospectDuplicateCheck(candidate) {
+  if (!state.knownCustomersLoaded) return { label: "Checking...", statusClass: "", detail: "Duplicate check loading..." };
+  if (!state.knownCustomersConfigured || !state.knownCustomers.length) {
+    return { label: "New Prospect", statusClass: "", detail: "Duplicate check unavailable — no known-customer data loaded." };
+  }
+  let best = null;
+  for (const known of state.knownCustomers) {
+    const score = matchScore(candidate.company, known.name);
+    if (!best || score > best.score) best = { score, known };
+  }
+  if (best && best.score >= 0.85) {
+    return { label: "Existing Customer", statusClass: "status-label--good", detail: `Matched real GP customer record — ${best.known.name} (${best.known.number})`, matched: best.known };
+  }
+  if (best && best.score >= 0.55) {
+    return { label: "Possible Duplicate", statusClass: "status-label--warn", detail: `Similar name to known customer ${best.known.name} (${best.known.number}) — review before treating as new.`, matched: best.known };
+  }
+  return { label: "New Prospect", statusClass: "", detail: "No match in known customer records (partial data — Auger sales only, Q1 2024)." };
 }
 
 function renderProspectResults() {
   const host = $("#prospectResults");
   if (!host) return;
   if (!state.prospectResults.length) {
-    host.innerHTML = '<div class="prospect-empty"><strong>Set the search parameters and run the prospect search.</strong><span>Company discovery, customer comparison, and equipment evidence return together.</span></div>';
+    host.innerHTML = '<div class="prospect-empty"><strong>Set the search parameters and run the prospect search.</strong><span>Company discovery is still demo data. The customer duplicate-check runs against a real, partial GP export.</span></div>';
     return;
   }
-  host.innerHTML = `<div class="prospect-summary"><strong>${state.prospectResults.length} companies reviewed</strong><span>Company search + account comparison + public evidence review</span></div><div class="prospect-grid">${state.prospectResults.map((candidate) => {
-    const [label, statusClassName] = prospectStatus(candidate);
-    const customerId = candidate.matchCustomerId || candidate.likelyCustomerId || "";
-    return `<article class="prospect-card"><header><div><span class="status-label ${statusClassName}">${label}</span><h3>${escapeHTML(candidate.company)}</h3><p>${escapeHTML(candidate.state)} · ${escapeHTML(candidate.territory)} · ${escapeHTML(candidate.market)} · ${escapeHTML(candidate.domain)}</p></div><div class="equipment-thumb" aria-hidden="true"><span></span></div></header>
-      <dl><dt>Account check</dt><dd>${escapeHTML(candidate.accountCheck)}</dd><dt>Distance</dt><dd>${candidate.distance} miles</dd><dt>Equipment evidence</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.equipment) : "Image review not requested"}</dd><dt>Possible equipment</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.possibleModel) : "Not reviewed"}</dd><dt>Confidence</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.confidence) : "—"}</dd><dt>Ownership</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.ownership) : "Not evaluated"}</dd><dt>Evidence source</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.evidence) : "—"}</dd></dl>
-      <footer>${customerId ? `<button type="button" class="secondary-button" data-prospect-customer="${escapeHTML(customerId)}">Open Customer</button>` : '<button type="button" class="primary-button" data-start-prospect>Start Prospect</button>'}<button type="button" class="secondary-button" data-review-evidence>Review Evidence</button></footer></article>`;
+  host.innerHTML = `<div class="prospect-summary"><strong>${state.prospectResults.length} companies reviewed</strong><span>Company list: demo data. Duplicate check: real, partial (${state.knownCustomers.length} known customers loaded).</span></div><div class="prospect-grid">${state.prospectResults.map((candidate) => {
+    const check = prospectDuplicateCheck(candidate);
+    return `<article class="prospect-card"><header><div><span class="status-label ${check.statusClass}">${check.label}</span><h3>${escapeHTML(candidate.company)}</h3><p>${escapeHTML(candidate.state)} · ${escapeHTML(candidate.territory)} · ${escapeHTML(candidate.market)} · ${escapeHTML(candidate.domain)}</p></div><div class="equipment-thumb" aria-hidden="true"><span></span></div></header>
+      <dl><dt>Account check</dt><dd>${escapeHTML(check.detail)}</dd><dt>Distance</dt><dd>${candidate.distance} miles</dd><dt>Equipment evidence</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.equipment) : "Image review not requested"}</dd><dt>Possible equipment</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.possibleModel) : "Not reviewed"}</dd><dt>Confidence</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.confidence) : "—"}</dd><dt>Ownership</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.ownership) : "Not evaluated"}</dd><dt>Evidence source</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.evidence) : "—"}</dd></dl>
+      <footer>${check.matched ? `<span class="prospect-matched-note">Matches a known customer — no MDB customer profile linked yet</span>` : '<button type="button" class="primary-button" data-start-prospect>Start Prospect</button>'}<button type="button" class="secondary-button" data-review-evidence>Review Evidence</button></footer></article>`;
   }).join("")}</div>`;
 }
 
 function renderProspectWorkspace() {
   const params = state.prospectParams;
   elements.overlayBody.innerHTML = `<div class="workbench prospect-workbench">
-    <section class="prospect-controls"><header><div><h3>Rule-Controlled Search</h3><p>One run searches companies, checks every internal identity signal, and reviews available public equipment evidence.</p></div><span class="demo-data-label">Controlled demo results</span></header>
+    <section class="prospect-controls"><header><div><h3>Rule-Controlled Search</h3><p>Company discovery is demo data pending a real search source. Customer duplicate-check runs against a real, partial GP export.</p></div><span class="demo-data-label">Mixed: demo discovery + real duplicate-check</span></header>
       <div class="prospect-fields"><label class="field"><span>Territory</span><select id="prospectTerritory">${["Nationwide", "Northeast", "Southeast", "Midwest", "Southwest", "West"].map((value) => `<option value="${value}" ${value === params.territory ? "selected" : ""}>${value}</option>`).join("")}</select></label><label class="field"><span>Market</span><select id="prospectMarket">${["All", "Geotechnical", "Environmental"].map((value) => `<option value="${value}" ${value === params.market ? "selected" : ""}>${value}</option>`).join("")}</select></label><label class="field"><span>Search radius</span><select id="prospectRadius">${["50", "100", "250", "Region-wide"].map((value) => `<option value="${value}" ${value === params.radius ? "selected" : ""}>${value}${/^\d+$/.test(value) ? " miles" : ""}</option>`).join("")}</select></label><label class="field field--wide"><span>Required terms</span><input id="prospectKeywords" value="${escapeHTML(params.keywords)}" placeholder="drilling, geotechnical, environmental..."></label></div>
-      <div class="prospect-rules"><label><input type="checkbox" checked disabled> Check customers, aliases, branches, domains, phones, addresses, and purchase history</label><label><input id="prospectVisual" type="checkbox" ${params.visual ? "checked" : ""}> Review public images for equipment evidence</label><span>Observed equipment is evidence only. Ownership stays unconfirmed until supported by records or a rep.</span><button type="button" class="primary-button" data-run-prospect>Run Prospect Search</button></div>
+      <div class="prospect-rules"><label><input type="checkbox" checked disabled> Check company name against known real GP customer records</label><label><input id="prospectVisual" type="checkbox" ${params.visual ? "checked" : ""}> Review public images for equipment evidence</label><span>Observed equipment is evidence only. Ownership stays unconfirmed until supported by records or a rep.</span><button type="button" class="primary-button" data-run-prospect>Run Prospect Search</button></div>
     </section><section id="prospectResults" class="prospect-results"></section></div>`;
   renderProspectResults();
 }
@@ -2680,10 +2713,8 @@ elements.overlayBody.addEventListener("click", (event) => {
         && candidate.distance <= radiusLimit
         && keywordTerms.every((term) => searchable.includes(term));
     });
-    renderProspectResults(); showToast("Prospect search, customer comparison, and equipment review complete"); return;
+    renderProspectResults(); showToast("Prospect search and customer duplicate-check complete"); return;
   }
-  const prospectCustomer = event.target.closest("[data-prospect-customer]");
-  if (prospectCustomer) { closeWorkspace(); openCustomerWorkspace(prospectCustomer.dataset.prospectCustomer); return; }
   if (event.target.closest("[data-start-prospect]")) { showToast("Prospect record started in demo mode"); return; }
   if (event.target.closest("[data-review-evidence]")) { showToast("Evidence source opened in demo mode"); return; }
   const logCall = event.target.closest("[data-log-call]");

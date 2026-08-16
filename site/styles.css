@@ -2982,6 +2982,14 @@ button:disabled {
   min-height: 34px;
 }
 
+.prospect-matched-note {
+  display: flex;
+  align-items: center;
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+  font-style: italic;
+}
+
 .training-intro {
   padding: 14px 16px;
   color: var(--white);
