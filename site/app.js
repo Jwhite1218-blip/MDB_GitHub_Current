@@ -39,6 +39,12 @@ const elements = {
   quoteModalClose: $("#quoteModalClose"),
   quoteModalTitle: $("#quoteModalTitle"),
   quoteModalBody: $("#quoteModalBody"),
+  orderModal: $("#orderModal"),
+  orderModalClose: $("#orderModalClose"),
+  orderModalTitle: $("#orderModalTitle"),
+  orderModalBody: $("#orderModalBody"),
+  backorderModal: $("#backorderModal"),
+  backorderModalBody: $("#backorderModalBody"),
 };
 
 const state = {
@@ -52,6 +58,13 @@ const state = {
   quotes: [],
   quotesBackendConfigured: false,
   quoteSaveTimer: null,
+  orders: [],
+  ordersBackendConfigured: false,
+  orderSaveTimer: null,
+  activeOrderId: "",
+  orderListOpen: { master: true, mine: true },
+  orderSearchTerm: "",
+  orderSearchTimer: null,
   rigQuoteFiles: {},
   stock: {},
   touches: {},
@@ -412,7 +425,8 @@ const calibrationTrainingScenarios = [
 const workspaceEntries = [
   ["Customer Profile", "Customer workspace", "customer", "customer client account company"],
   ["Tooling", "Full catalog and CTS search", "tooling", "tooling drive cap split spoon hsa auger hex cor moyno drill rod"],
-  ["Quote Builder", "One browser-saved demo draft", "quotes", "quote pricing estimate builder"],
+  ["Quote Builder", "Shared team quotes, GP-style layout", "quotes", "quote pricing estimate builder"],
+  ["Orders", "Open orders, shipped and backorder tracking", "orders", "order orders open backorder shipped fulfillment"],
   ["Inventory", "Editable GP-field demo", "inventory", "inventory stock available on hand allocated bin price"],
   ["Rig / BOM View", "B57 and B37X serial BOMs", "bom", "rig bom serial assembly parts bill material b57 b37x"],
   ["Calibration", "Calibration history, schedule, and quote", "calibration", "calibration hammer schedule certificate"],
@@ -663,6 +677,27 @@ function newQuote(overrides = {}) {
   };
 }
 
+function newOrder(overrides = {}) {
+  const identity = state.identity;
+  const now = new Date().toISOString();
+  const customer = customers.find((item) => item.id === state.selectedCustomerId);
+  return {
+    id: `order-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    orderNumber: "",
+    masterNo: null,
+    convertedFromQuoteId: null,
+    customerId: state.selectedCustomerId || "", customerPo: "", salesperson: "",
+    terms: "Net 30", shipVia: "Best Way",
+    shipToContact: customer?.contact || "", shipToAddress: customer?.address || "",
+    reqShipDate: "", notes: "", misc: 0, freight: 0, tradeDiscount: 0, lines: [],
+    status: "Open",
+    originatorInitials: identity?.initials || "", originatorName: identity?.name || "",
+    lastModifiedByInitials: identity?.initials || "", lastModifiedByName: identity?.name || "",
+    createdAt: now, lastModifiedAt: now,
+    ...overrides,
+  };
+}
+
 async function loadQuotes() {
   try {
     const response = await fetch("/.netlify/functions/quotes-list");
@@ -726,6 +761,102 @@ async function pushQuoteToBackend(quote) {
 function requireIdentity(callback) {
   if (state.identity) { callback(); return; }
   openIdentityPicker(callback);
+}
+
+async function loadOrders() {
+  try {
+    const response = await fetch("/.netlify/functions/orders-list");
+    if (response.ok) {
+      const data = await response.json();
+      if (data.configured) {
+        state.orders = data.orders;
+        state.ordersBackendConfigured = true;
+        saveOrders();
+        return;
+      }
+    }
+  } catch {
+    // backend unreachable -- fall through to the local copy
+  }
+  state.ordersBackendConfigured = false;
+  state.orders = safeLoad("mdb-demo-orders", []);
+}
+
+function saveOrders() {
+  safeSave("mdb-demo-orders", state.orders);
+}
+
+async function pushOrderToBackend(order) {
+  try {
+    const response = await fetch("/.netlify/functions/orders-save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(order),
+    });
+    if (!response.ok) return;
+    const data = await response.json().catch(() => ({}));
+    state.ordersBackendConfigured = data.configured !== false;
+    let changed = false;
+    if (data.orderNumber && !order.orderNumber) { order.orderNumber = data.orderNumber; changed = true; }
+    if (data.masterNo != null && order.masterNo == null) { order.masterNo = data.masterNo; changed = true; }
+    if (changed) {
+      saveOrders();
+      if (state.activeOrderId === order.id && !elements.orderModal.hidden) renderOrderModal();
+    }
+  } catch {
+    // offline or backend unreachable -- the local copy already saved via saveOrders()
+  }
+}
+
+function activeOrder() {
+  return state.orders.find((order) => order.id === state.activeOrderId) || null;
+}
+
+function touchOrder(order) {
+  order.lastModifiedAt = new Date().toISOString();
+  if (state.identity) { order.lastModifiedByInitials = state.identity.initials; order.lastModifiedByName = state.identity.name; }
+  saveOrders();
+  clearTimeout(state.orderSaveTimer);
+  state.orderSaveTimer = setTimeout(() => pushOrderToBackend(order), 600);
+}
+
+let backorderResolveCallback = null;
+
+function openBackorderConfirm({ part, description, onYes, onNo }) {
+  backorderResolveCallback = { onYes, onNo };
+  elements.backorderModalBody.innerHTML = `
+    <p>Performing this action will cause a backorder due to inventory levels. Do you want to proceed?</p>
+    <div class="backorder-part-callout"><strong>${escapeHTML(part || "This part")}</strong><span>${escapeHTML(description || "")}</span></div>
+    <div class="backorder-actions">
+      <button type="button" class="secondary-button" data-backorder-no>No — let me change it</button>
+      <button type="button" class="primary-button" data-backorder-yes>Yes — proceed with backorder</button>
+    </div>`;
+  elements.backorderModal.hidden = false;
+}
+
+function closeBackorderConfirm() {
+  elements.backorderModal.hidden = true;
+  backorderResolveCallback = null;
+}
+
+function applyLineQuantity(line, requestedQty, onResolved) {
+  const stock = getStock(line.part);
+  const available = Math.max(0, Number(stock.onHand) - Number(stock.allocated));
+  const commit = (shipped, backorder) => {
+    stock.onHand = Number(stock.onHand) - shipped;
+    saveStock();
+    line.quantity = requestedQty;
+    line.shippedQty = shipped;
+    line.backorderQty = backorder;
+    onResolved(true);
+  };
+  if (requestedQty <= available) { commit(requestedQty, 0); return; }
+  openBackorderConfirm({
+    part: line.part,
+    description: line.description,
+    onYes: () => { closeBackorderConfirm(); commit(available, requestedQty - available); },
+    onNo: () => { closeBackorderConfirm(); onResolved(false); },
+  });
 }
 
 function startCalibrationQuote(customer) {
@@ -800,6 +931,7 @@ async function loadData() {
   state.stock = safeLoad("mdb-demo-stock", {});
   state.touches = safeLoad("mdb-demo-touches", {});
   await loadQuotes();
+  await loadOrders();
   loadRigSalesOpportunities();
   state.identity = safeLoad("mdb-demo-identity", null) || safeLoad("mdb-demo-calib-identity", null);
   state.calibResults = safeLoad("mdb-demo-calib-results", []);
@@ -1025,7 +1157,7 @@ function openWorkspace(type, options = {}) {
   const customer = customers.find((item) => item.id === state.selectedCustomerId);
   elements.overlayEyebrow.textContent = type === "customerTooling" ? customer?.name || "Customer" : "MDB";
   const titles = {
-    tooling: "Tooling", customerTooling: "Customer Tooling", quotes: "Quote Builder", inventory: "Inventory", bom: "Rig / BOM View", rigSpecs: "Rig Specifications",
+    tooling: "Tooling", customerTooling: "Customer Tooling", quotes: "Quote Builder", orders: "Orders", inventory: "Inventory", bom: "Rig / BOM View", rigSpecs: "Rig Specifications",
     calibration: "Calibration", rigSales: "Rig Sales", prospects: "New Prospect Search", callList: "Daily Call List",
     calibrationTraining: "Calibration Training", workflowTraining: "Workflow Training",
   };
@@ -1040,6 +1172,7 @@ function openWorkspace(type, options = {}) {
     renderCustomerToolingWorkspace(customer);
   }
   if (type === "quotes") { renderQuoteWorkspace(); if (state.quotesBackendConfigured) loadQuotes().then(() => { if (state.activeWorkspace === "quotes") renderQuoteWorkspace(); }); }
+  if (type === "orders") { renderOrdersWorkspace(); if (state.ordersBackendConfigured) loadOrders().then(() => { if (state.activeWorkspace === "orders") renderOrdersWorkspace(); }); }
   if (type === "inventory") renderInventoryWorkspace(options.query || "");
   if (type === "bom") renderBomWorkspace(options);
   if (type === "rigSpecs") renderRigSpecsWorkspace(options);
@@ -1496,6 +1629,192 @@ function closeQuoteModal() {
   if (state.activeWorkspace === "quotes") renderQuoteWorkspace();
 }
 
+function convertQuoteToOrder(quote) {
+  const backorderedParts = [];
+  const orderLines = quote.lines.map((line) => {
+    if (!line.part) return { ...line, shippedQty: line.quantity, backorderQty: 0 };
+    const stock = getStock(line.part);
+    const available = Math.max(0, Number(stock.onHand) - Number(stock.allocated));
+    const shipped = Math.min(line.quantity, available);
+    const backorder = line.quantity - shipped;
+    stock.onHand = Number(stock.onHand) - shipped;
+    if (backorder > 0) backorderedParts.push(line.part);
+    return { ...line, shippedQty: shipped, backorderQty: backorder };
+  });
+  saveStock();
+
+  const order = newOrder({
+    convertedFromQuoteId: quote.id,
+    customerId: quote.customerId, customerPo: quote.customerPo, salesperson: quote.salesperson,
+    terms: quote.terms, shipVia: quote.shipVia, shipToContact: quote.shipToContact, shipToAddress: quote.shipToAddress,
+    reqShipDate: quote.reqShipDate, notes: quote.notes, misc: quote.misc, freight: quote.freight, tradeDiscount: quote.tradeDiscount,
+    lines: orderLines,
+  });
+  state.orders.unshift(order);
+  touchOrder(order);
+
+  quote.status = "Won";
+  quote.notes = `${quote.notes ? `${quote.notes} ` : ""}Converted to an order.`.trim();
+  touchQuote(quote);
+
+  closeQuoteModal();
+  openOrderModal(order.id);
+  showToast(backorderedParts.length
+    ? `Order created — backorder due to inventory on: ${backorderedParts.join(", ")}`
+    : "Order created — everything shipped from stock");
+}
+
+function sortedOpenOrders() {
+  return state.orders.filter((order) => order.status === "Open").sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+function orderCompanyName(order) {
+  const customer = customers.find((item) => item.id === order.customerId);
+  return customer?.name || "No customer selected";
+}
+
+function orderTotals(order) {
+  const subtotal = order.lines.reduce((sum, line) => sum + lineExtended(line), 0);
+  const total = subtotal + Number(order.misc || 0) + Number(order.freight || 0) - Number(order.tradeDiscount || 0);
+  return { subtotal, total };
+}
+
+function renderOrderListSection(title, orders, sectionKey) {
+  const open = state.orderListOpen[sectionKey];
+  return `<section class="quote-list-section">
+    <button type="button" class="quote-list-toggle" data-order-list-toggle="${sectionKey}">
+      <span>${escapeHTML(title)} (${orders.length})</span><span class="quote-list-caret">${open ? "▾" : "▸"}</span>
+    </button>
+    ${open ? (orders.length
+      ? `<div class="quote-list-rows">${orders.map((order) => `<button type="button" class="quote-list-row" data-order-open="${order.id}"><strong>${escapeHTML(orderCompanyName(order))}</strong><span>${escapeHTML(order.orderNumber || "Pending #")}</span></button>`).join("")}</div>`
+      : '<p class="quote-list-empty">No open orders yet.</p>') : ""}
+  </section>`;
+}
+
+function renderOrdersWorkspace() {
+  const openOrders = sortedOpenOrders();
+  const mine = state.identity ? openOrders.filter((order) => order.originatorInitials === state.identity.initials) : [];
+  elements.overlayBody.innerHTML = `<div class="workbench quotes-workbench">
+    <div class="operations-toolbar"><div><strong>Orders</strong><span>${state.ordersBackendConfigured ? "Synced live across the team — not sent to GP." : "Browser-local only right now — not yet synced across devices, not sent to GP."}</span></div><button type="button" class="primary-button" data-order-new>Start New Order</button></div>
+    ${renderOrderListSection("All Open Orders", openOrders, "master")}
+    ${renderOrderListSection("My Orders", mine, "mine")}
+  </div>`;
+}
+
+function openOrderModal(orderId) {
+  state.activeOrderId = orderId;
+  state.orderSearchTerm = "";
+  renderOrderModal();
+  elements.orderModal.hidden = false;
+}
+
+function closeOrderModal() {
+  elements.orderModal.hidden = true;
+  state.activeOrderId = "";
+  if (state.activeWorkspace === "orders") renderOrdersWorkspace();
+}
+
+function renderOrderSearchResults() {
+  const host = $("#orderSearchResults");
+  if (!host) return;
+  const term = state.orderSearchTerm.trim();
+  if (!term) { host.innerHTML = ""; return; }
+  const toolingMatches = state.toolItems.map((item) => ({ ...item, score: matchScore(term, `${item.part} ${item.description}`), kind: "tooling" }));
+  const rigMatches = state.data.rig.items.map((item) => ({ part: item.part, description: item.cleanDescription || item.description, id: item.part, score: matchScore(term, `${item.part} ${item.cleanDescription || item.description}`), kind: "rig" }));
+  const results = [...toolingMatches, ...rigMatches].filter((item) => item.score >= 0.5 && item.part).sort((a, b) => b.score - a.score).slice(0, 8);
+  host.innerHTML = results.length
+    ? results.map((item) => `<button type="button" class="advanced-search-result" data-order-search-add-part="${escapeHTML(item.part)}" data-order-search-add-description="${escapeHTML(item.description || "")}"><strong>${escapeHTML(item.part)}</strong><span>${escapeHTML(item.description || "")} · ${item.kind === "rig" ? "Rig Parts" : "Tooling"}</span></button>`).join("")
+    : '<p class="advanced-search-empty">No matches.</p>';
+}
+
+function addOrderLine(part, description, price = 0, source = "MDB demo") {
+  const order = activeOrder();
+  if (!order) { showToast("Open an order first"); return; }
+  const line = { part: part || "", description: description || "", uom: "EA", quantity: 1, shippedQty: 0, backorderQty: 0, unitPrice: Number(price) || 0, discount: 0, taxable: false, source };
+  order.lines.push(line);
+  applyLineQuantity(line, 1, (accepted) => {
+    if (!accepted) { order.lines.pop(); return; }
+    touchOrder(order);
+    showToast(`${part || "Line"} added to order`);
+    if (!elements.orderModal.hidden) renderOrderModal();
+  });
+}
+
+function renderOrderLines(order) {
+  if (!order.lines.length) return '<div class="quote-empty">No lines yet. Search above to add Tooling or Rig Parts.</div>';
+  return order.lines.map((line, index) => `<div class="order-line" data-line-index="${index}">
+      <input class="line-input" data-line-field="part" value="${escapeHTML(line.part)}" aria-label="Part number">
+      <input class="line-input line-description" data-line-field="description" value="${escapeHTML(line.description)}" aria-label="Description">
+      <input class="line-input line-uom" data-line-field="uom" value="${escapeHTML(line.uom || "EA")}" aria-label="Unit of measure">
+      <input class="line-input" type="number" min="1" max="5000" step="1" data-line-field="quantity" value="${line.quantity}" aria-label="Ordered quantity">
+      <input class="line-input" type="number" min="0" data-line-field="shippedQty" value="${line.shippedQty || 0}" aria-label="Shipped quantity">
+      <input class="line-input ${line.backorderQty ? "is-backordered" : ""}" type="number" min="0" data-line-field="backorderQty" value="${line.backorderQty || 0}" aria-label="Backorder quantity">
+      <input class="line-input" type="number" min="0" step="0.01" data-line-field="unitPrice" value="${line.unitPrice}" aria-label="Unit price">
+      <input class="line-input" type="number" min="0" step="0.01" data-line-field="discount" value="${line.discount}" aria-label="Discount amount">
+      <input type="checkbox" data-line-field="taxable" ${line.taxable ? "checked" : ""} aria-label="Taxable">
+      <strong class="line-extended">${formatCurrency(lineExtended(line))}</strong>
+      <button class="line-remove" type="button" data-line-remove="${index}" aria-label="Remove line">×</button>
+    </div>`).join("");
+}
+
+function updateOrderNumbers() {
+  const order = activeOrder();
+  if (!order) return;
+  const totals = orderTotals(order);
+  $("#orderSubtotal") && ($("#orderSubtotal").textContent = formatCurrency(totals.subtotal));
+  $("#orderTotal") && ($("#orderTotal").textContent = formatCurrency(totals.total));
+  $$(".order-line[data-line-index]").forEach((row) => {
+    const line = order.lines[Number(row.dataset.lineIndex)];
+    $(".line-extended", row).textContent = formatCurrency(lineExtended(line));
+  });
+}
+
+function renderOrderModal() {
+  const order = activeOrder();
+  if (!order) return;
+  const totals = orderTotals(order);
+  elements.orderModalTitle.textContent = `${order.orderNumber || "New Order"} — ${orderCompanyName(order)}`;
+  elements.orderModalBody.innerHTML = `<div class="quote-context"><div><span>Order</span><strong>${escapeHTML(orderCompanyName(order))}</strong>${order.masterNo ? `<small>Master No. ${escapeHTML(String(order.masterNo))}</small>` : ""}${order.convertedFromQuoteId ? `<small>Converted from a quote</small>` : ""}</div>
+      <label class="field quote-status-field"><span>Status</span><select data-order-meta-field="status">${["Open", "Closed"].map((option) => `<option ${option === order.status ? "selected" : ""}>${option}</option>`).join("")}</select></label>
+    </div>
+    <p class="quote-attribution">Originated by ${escapeHTML(order.originatorName || "Unknown")}${order.originatorInitials ? ` (${escapeHTML(order.originatorInitials)})` : ""} · Last edited by ${escapeHTML(order.lastModifiedByName || "Unknown")} ${order.lastModifiedAt ? new Date(order.lastModifiedAt).toLocaleString() : ""}</p>
+    <div class="quote-search-wrap">
+      <label class="field"><span>Search Tooling &amp; Rig Parts to add</span><input type="text" id="orderSearchInput" autocomplete="off" spellcheck="false" placeholder="Part number or description..." value="${escapeHTML(state.orderSearchTerm)}"></label>
+      <div id="orderSearchResults" class="quote-search-results"></div>
+    </div>
+    <div class="quote-layout">
+      <section class="quote-form">
+        <div class="quote-fields">
+          <label class="field"><span>Customer</span><select data-order-meta-field="customerId">${customerOptions(order.customerId)}</select></label>
+          <label class="field"><span>Customer PO / Ref</span><input data-order-meta-field="customerPo" value="${escapeHTML(order.customerPo)}"></label>
+          <label class="field"><span>Salesperson</span><input data-order-meta-field="salesperson" value="${escapeHTML(order.salesperson)}"></label>
+          <label class="field"><span>Payment Terms</span><select data-order-meta-field="terms">${paymentTermsOptions.map((option) => `<option ${option === order.terms ? "selected" : ""}>${option}</option>`).join("")}</select></label>
+          <label class="field"><span>Shipping Method</span><select data-order-meta-field="shipVia">${shipViaOptions.map((option) => `<option ${option === order.shipVia ? "selected" : ""}>${option}</option>`).join("")}</select></label>
+          <label class="field"><span>Req Ship Date</span><input type="date" data-order-meta-field="reqShipDate" value="${escapeHTML(order.reqShipDate || "")}"></label>
+        </div>
+        <div class="quote-fields quote-fields--shipto">
+          <label class="field"><span>Ship To Contact</span><input data-order-meta-field="shipToContact" value="${escapeHTML(order.shipToContact || "")}"></label>
+          <label class="field field--wide"><span>Ship To Address</span><input data-order-meta-field="shipToAddress" value="${escapeHTML(order.shipToAddress || "")}"></label>
+        </div>
+        <div class="order-lines"><div class="order-line order-line--header"><span>Part</span><span>Description</span><span>UOM</span><span>Ordered</span><span>Shipped</span><span>B/O</span><span>Unit Price</span><span>Discount</span><span>Tax</span><span>Extended</span><span></span></div>
+          <div id="orderLineRows">${renderOrderLines(order)}</div>
+          <button class="secondary-button" type="button" data-order-add-line>Add Blank Line</button>
+        </div>
+        <label class="field quote-notes"><span>Internal demo notes</span><textarea data-order-meta-field="notes" rows="4">${escapeHTML(order.notes)}</textarea></label>
+      </section>
+      <aside class="quote-summary"><h3>Order Summary</h3>
+        <div class="summary-row"><span>Subtotal</span><strong id="orderSubtotal">${formatCurrency(totals.subtotal)}</strong></div>
+        <label class="summary-input"><span>Misc</span><input type="number" min="0" step="0.01" data-order-meta-field="misc" value="${order.misc}"></label>
+        <label class="summary-input"><span>Freight</span><input type="number" min="0" step="0.01" data-order-meta-field="freight" value="${order.freight}"></label>
+        <label class="summary-input"><span>Trade Discount</span><input type="number" min="0" step="0.01" data-order-meta-field="tradeDiscount" value="${order.tradeDiscount}"></label>
+        <div class="summary-row"><span>Tax</span><span class="quote-tax-note">Calculated by GP</span></div>
+        <div class="summary-row total"><span>Total</span><strong id="orderTotal">${formatCurrency(totals.total)}</strong></div>
+        <p class="quote-state">Every edit here saves and is visible to the whole team.</p>
+      </aside>
+    </div>`;
+  renderOrderSearchResults();
+}
+
 function renderQuoteSearchResults() {
   const host = $("#quoteSearchResults");
   if (!host) return;
@@ -1519,6 +1838,7 @@ function renderQuoteModal() {
   elements.quoteModalTitle.textContent = `${quote.number} — ${quoteCompanyName(quote)}`;
   elements.quoteModalBody.innerHTML = `<div class="quote-context"><div><span>${escapeHTML(quote.workflow || "General")} quote</span><strong>${escapeHTML(quoteCompanyName(quote))}</strong>${quote.masterNo ? `<small>Master No. ${escapeHTML(String(quote.masterNo))}</small>` : ""}</div>
       <label class="field quote-status-field"><span>Status</span><select data-quote-meta-field="status">${["Open", "Won", "Lost", "Archived"].map((option) => `<option ${option === quote.status ? "selected" : ""}>${option}</option>`).join("")}</select></label>
+      ${quote.status === "Open" ? '<button type="button" class="primary-button" data-quote-convert-to-order>Change To → Order</button>' : ""}
     </div>
     <p class="quote-attribution">Originated by ${escapeHTML(quote.originatorName || "Unknown")}${quote.originatorInitials ? ` (${escapeHTML(quote.originatorInitials)})` : ""} · Last edited by ${escapeHTML(quote.lastModifiedByName || "Unknown")} ${quote.lastModifiedAt ? new Date(quote.lastModifiedAt).toLocaleString() : ""}</p>
     <div class="quote-search-wrap">
@@ -2256,7 +2576,21 @@ elements.overlayBody.addEventListener("click", (event) => {
   const quoteListToggle = event.target.closest("[data-quote-list-toggle]");
   if (quoteListToggle) { const key = quoteListToggle.dataset.quoteListToggle; state.quoteListOpen[key] = !state.quoteListOpen[key]; renderQuoteWorkspace(); return; }
   const quoteOpen = event.target.closest("[data-quote-open]");
-  if (quoteOpen) { openQuoteModal(quoteOpen.dataset.quoteOpen); }
+  if (quoteOpen) { openQuoteModal(quoteOpen.dataset.quoteOpen); return; }
+  if (event.target.closest("[data-order-new]")) {
+    requireIdentity(() => {
+      const order = newOrder();
+      state.orders.unshift(order);
+      touchOrder(order);
+      renderOrdersWorkspace();
+      openOrderModal(order.id);
+    });
+    return;
+  }
+  const orderListToggle = event.target.closest("[data-order-list-toggle]");
+  if (orderListToggle) { const key = orderListToggle.dataset.orderListToggle; state.orderListOpen[key] = !state.orderListOpen[key]; renderOrdersWorkspace(); return; }
+  const orderOpen = event.target.closest("[data-order-open]");
+  if (orderOpen) { openOrderModal(orderOpen.dataset.orderOpen); }
 });
 
 elements.homeButton.addEventListener("click", showHome);
@@ -2272,6 +2606,12 @@ elements.identityModal.addEventListener("click", (event) => {
 elements.identityModalBody.addEventListener("click", (event) => {
   const button = event.target.closest("[data-identity-select-rep]");
   if (button) selectIdentity(button.dataset.identitySelectRep);
+});
+
+elements.backorderModalBody.addEventListener("click", (event) => {
+  if (!backorderResolveCallback) return;
+  if (event.target.closest("[data-backorder-yes]")) backorderResolveCallback.onYes();
+  else if (event.target.closest("[data-backorder-no]")) backorderResolveCallback.onNo();
 });
 
 elements.quoteModalClose.addEventListener("click", closeQuoteModal);
@@ -2327,6 +2667,76 @@ elements.quoteModalBody.addEventListener("click", (event) => {
   if (remove) { const quote = activeQuote(); if (!quote) return; quote.lines.splice(Number(remove.dataset.lineRemove), 1); touchQuote(quote); renderQuoteModal(); return; }
   const searchAdd = event.target.closest("[data-quote-search-add-part]");
   if (searchAdd) { addQuoteLine(searchAdd.dataset.quoteSearchAddPart, searchAdd.dataset.quoteSearchAddDescription); return; }
+  if (event.target.closest("[data-quote-convert-to-order]")) {
+    const quote = activeQuote();
+    if (!quote) return;
+    requireIdentity(() => convertQuoteToOrder(quote));
+  }
+});
+
+elements.orderModalClose.addEventListener("click", closeOrderModal);
+elements.orderModal.addEventListener("click", (event) => {
+  if (event.target === elements.orderModal) closeOrderModal();
+});
+elements.orderModalBody.addEventListener("input", (event) => {
+  const target = event.target;
+  if (target.id === "orderSearchInput") {
+    state.orderSearchTerm = target.value;
+    clearTimeout(state.orderSearchTimer);
+    state.orderSearchTimer = setTimeout(renderOrderSearchResults, 90);
+    return;
+  }
+  const order = activeOrder();
+  if (!order) return;
+  if (target.matches("[data-order-meta-field]")) {
+    const field = target.dataset.orderMetaField;
+    order[field] = target.type === "number" ? Number(target.value) : target.value;
+    touchOrder(order);
+    if (field === "customerId") elements.orderModalTitle.textContent = `${order.orderNumber || "New Order"} — ${orderCompanyName(order)}`;
+    updateOrderNumbers();
+  }
+  if (target.matches("[data-line-field]") && target.dataset.lineField !== "quantity") {
+    const row = target.closest("[data-line-index]");
+    const line = order.lines[Number(row.dataset.lineIndex)];
+    const field = target.dataset.lineField;
+    line[field] = target.type === "checkbox" ? target.checked : target.type === "number" ? Number(target.value) : target.value;
+    touchOrder(order);
+    updateOrderNumbers();
+  }
+});
+elements.orderModalBody.addEventListener("change", (event) => {
+  const target = event.target;
+  const order = activeOrder();
+  if (!order) return;
+  if (target.matches("[data-order-meta-field]") && target.tagName === "SELECT") {
+    order[target.dataset.orderMetaField] = target.value;
+    touchOrder(order);
+    if (target.dataset.orderMetaField === "status") renderOrdersWorkspace();
+  }
+  if (target.matches("[data-line-field]") && target.dataset.lineField === "quantity") {
+    const row = target.closest("[data-line-index]");
+    const line = order.lines[Number(row.dataset.lineIndex)];
+    const requestedQty = clampQuantity(target.value);
+    applyLineQuantity(line, requestedQty, (accepted) => {
+      if (!accepted) { target.value = line.quantity; return; }
+      touchOrder(order);
+      renderOrderModal();
+    });
+  }
+});
+elements.orderModalBody.addEventListener("click", (event) => {
+  if (event.target.closest("[data-order-add-line]")) {
+    const order = activeOrder();
+    if (!order) return;
+    order.lines.push({ part: "", description: "", uom: "EA", quantity: 1, shippedQty: 1, backorderQty: 0, unitPrice: 0, discount: 0, taxable: false, source: "Manual" });
+    touchOrder(order);
+    renderOrderModal();
+    return;
+  }
+  const remove = event.target.closest("[data-line-remove]");
+  if (remove) { const order = activeOrder(); if (!order) return; order.lines.splice(Number(remove.dataset.lineRemove), 1); touchOrder(order); renderOrderModal(); return; }
+  const searchAdd = event.target.closest("[data-order-search-add-part]");
+  if (searchAdd) { addOrderLine(searchAdd.dataset.orderSearchAddPart, searchAdd.dataset.orderSearchAddDescription); return; }
 });
 
 elements.advancedSearchButton.addEventListener("click", openAdvancedSearch);
@@ -2421,7 +2831,9 @@ elements.calibrationButton.addEventListener("click", () => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
-    if (!elements.identityModal.hidden) closeIdentityPicker();
+    if (!elements.backorderModal.hidden) { backorderResolveCallback?.onNo(); }
+    else if (!elements.identityModal.hidden) closeIdentityPicker();
+    else if (!elements.orderModal.hidden) closeOrderModal();
     else if (!elements.quoteModal.hidden) closeQuoteModal();
     else if (!elements.advancedSearchModal.hidden) closeAdvancedSearch();
     else if (!elements.workspaceOverlay.hidden) closeWorkspace();

@@ -8,8 +8,8 @@
       content="Mobile Drill Brain operational workspace demo."
     >
     <title>Mobile Drill Brain</title>
-    <link rel="stylesheet" href="styles.css?v=20260816-2">
-    <script src="app.js?v=20260816-2" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260816-3">
+    <script src="app.js?v=20260816-3" defer></script>
   </head>
 
   <body>
@@ -41,6 +41,7 @@
         <button type="button" data-open="customer"><span class="workspace-nav-icon" aria-hidden="true">C</span><span>Customers</span></button>
         <button type="button" data-open="tooling"><span class="workspace-nav-icon" aria-hidden="true">T</span><span>Tooling</span></button>
         <button type="button" data-open="quotes"><span class="workspace-nav-icon" aria-hidden="true">Q</span><span>Quotes</span></button>
+        <button type="button" data-open="orders"><span class="workspace-nav-icon" aria-hidden="true">O</span><span>Orders</span></button>
         <button type="button" data-open="inventory"><span class="workspace-nav-icon" aria-hidden="true">I</span><span>Inventory</span></button>
         <button type="button" data-open="bom"><span class="workspace-nav-icon" aria-hidden="true">B</span><span>Rig / BOM</span></button>
       </div>
@@ -91,6 +92,7 @@
               <button type="button" data-open="customer"><span class="quick-icon quick-icon--customer" aria-hidden="true"></span><span>Customer</span></button>
               <button type="button" data-open="tooling"><span class="quick-icon quick-icon--tooling" aria-hidden="true"></span><span>Tooling</span></button>
               <button type="button" data-open="quotes"><span class="quick-icon quick-icon--quotes" aria-hidden="true"></span><span>Quotes</span></button>
+              <button type="button" data-open="orders"><span class="quick-icon" aria-hidden="true">O</span><span>Orders</span></button>
               <button type="button" data-open="inventory"><span class="quick-icon quick-icon--inventory" aria-hidden="true"></span><span>Inventory</span></button>
               <button type="button" data-open="bom"><span class="quick-icon quick-icon--bom" aria-hidden="true"></span><span>Rig / BOM</span></button>
             </nav>
@@ -210,6 +212,25 @@
           <button id="quoteModalClose" class="close-button" type="button" aria-label="Close quote">&#215;</button>
         </header>
         <div id="quoteModalBody" class="popup-body"></div>
+      </div>
+    </div>
+
+    <div id="orderModal" class="popup-modal" hidden>
+      <div class="popup-panel popup-panel--wide">
+        <header>
+          <h2 id="orderModalTitle">Order</h2>
+          <button id="orderModalClose" class="close-button" type="button" aria-label="Close order">&#215;</button>
+        </header>
+        <div id="orderModalBody" class="popup-body"></div>
+      </div>
+    </div>
+
+    <div id="backorderModal" class="popup-modal" hidden>
+      <div class="popup-panel">
+        <header>
+          <h2>Backorder Warning</h2>
+        </header>
+        <div id="backorderModalBody" class="popup-body"></div>
       </div>
     </div>
 

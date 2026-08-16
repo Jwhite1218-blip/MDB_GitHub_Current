@@ -1759,6 +1759,63 @@ button:disabled {
   text-align: center;
 }
 
+.order-lines {
+  overflow-x: auto;
+}
+
+.order-line {
+  display: grid;
+  grid-template-columns: 100px minmax(150px, 1fr) 50px 58px 58px 58px 88px 68px 36px 84px 36px;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 7px;
+  min-width: 900px;
+}
+
+.order-line--header {
+  margin-bottom: 7px;
+  color: var(--ink-faint);
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.order-line--header span:nth-child(n + 3) {
+  text-align: center;
+}
+
+.is-backordered {
+  border-color: var(--warning);
+  background: var(--warning-pale);
+}
+
+.backorder-part-callout {
+  padding: 10px 12px;
+  margin: 12px 0;
+  background: var(--warning-pale);
+  border: 1px solid #f0d895;
+  border-radius: var(--radius);
+}
+
+.backorder-part-callout strong {
+  display: block;
+}
+
+.backorder-part-callout span {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+}
+
+.backorder-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
 .quote-line--header {
   margin-bottom: 7px;
   color: var(--ink-faint);
