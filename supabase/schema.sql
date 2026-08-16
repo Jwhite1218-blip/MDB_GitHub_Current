@@ -46,3 +46,10 @@ create table if not exists quote_lines (
 create index if not exists quote_lines_quote_id_idx on quote_lines (quote_id);
 create index if not exists quotes_status_idx on quotes (status);
 create index if not exists quotes_created_at_idx on quotes (created_at desc);
+
+-- service_role bypasses Row Level Security but NOT ordinary table grants --
+-- these are required even for the service key to read/write these tables.
+grant usage on schema public to service_role;
+grant all on public.quotes to service_role;
+grant all on public.quote_lines to service_role;
+grant usage, select on all sequences in schema public to service_role;
