@@ -704,7 +704,13 @@ async function loadQuotes() {
     if (response.ok) {
       const data = await response.json();
       if (data.configured) {
-        state.quotes = data.quotes;
+        // Merge rather than replace: a quote created locally in the last
+        // few hundred ms may not have finished its debounced save yet, so
+        // it won't be in this response -- don't let a slow-arriving refresh
+        // wipe out a rep's just-created quote out from under them.
+        const serverIds = new Set(data.quotes.map((quote) => quote.id));
+        const unsavedLocal = state.quotes.filter((quote) => !serverIds.has(quote.id));
+        state.quotes = [...unsavedLocal, ...data.quotes];
         state.quotesBackendConfigured = true;
         saveQuotes();
         return;
@@ -769,7 +775,12 @@ async function loadOrders() {
     if (response.ok) {
       const data = await response.json();
       if (data.configured) {
-        state.orders = data.orders;
+        // Same merge-not-replace reasoning as loadQuotes() -- don't let a
+        // slow-arriving refresh wipe out an order created moments ago whose
+        // debounced save hasn't landed yet.
+        const serverIds = new Set(data.orders.map((order) => order.id));
+        const unsavedLocal = state.orders.filter((order) => !serverIds.has(order.id));
+        state.orders = [...unsavedLocal, ...data.orders];
         state.ordersBackendConfigured = true;
         saveOrders();
         return;
