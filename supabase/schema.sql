@@ -9,18 +9,28 @@
 -- Run this once in the Supabase SQL editor (or via `supabase db push`
 -- once a CLI project is linked) to set up the tables.
 
+-- Shared internal running record number (mirrors GP's "Master No." field).
+-- Used by both quotes and, eventually, orders -- one sequence, one number
+-- space, regardless of which document type draws the next value.
+create sequence if not exists master_no_seq start 80000;
+
 create table if not exists quotes (
   id text primary key,
   number text not null,
+  master_no bigint not null default nextval('master_no_seq'),
   customer_id text not null default '',
   customer_po text not null default '',
   salesperson text not null default '',
   workflow text not null default 'General',
   terms text not null default 'Net 30',
-  ship_via text not null default 'Best way',
+  ship_via text not null default 'Best Way',
+  ship_to_contact text not null default '',
+  ship_to_address text not null default '',
+  req_ship_date date,
   notes text not null default '',
+  misc numeric not null default 0,
   freight numeric not null default 0,
-  tax_rate numeric not null default 0,
+  trade_discount numeric not null default 0,
   status text not null default 'Open' check (status in ('Open', 'Won', 'Lost', 'Archived')),
   originator_initials text not null default '',
   originator_name text not null default '',
@@ -36,6 +46,7 @@ create table if not exists quote_lines (
   sort_order int not null default 0,
   part text not null default '',
   description text not null default '',
+  uom text not null default 'EA',
   quantity int not null default 1 check (quantity between 1 and 5000),
   unit_price numeric not null default 0,
   discount numeric not null default 0,

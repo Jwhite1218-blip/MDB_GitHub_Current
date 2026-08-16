@@ -124,6 +124,7 @@ function buildCustomer(name, index) {
   const serial = index % 2 ? "2025023" : "2025028";
   return {
     id: slugify(name),
+    code: normalize(name).replace(/\s+/g, "").toUpperCase().slice(0, 15),
     name,
     contact: `Demo Contact ${index + 1}`,
     title: index % 3 ? "Drilling Manager" : "Operations Manager",
@@ -645,11 +646,15 @@ function newQuote(overrides = {}) {
   const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
   const identity = state.identity;
   const now = new Date().toISOString();
+  const customer = customers.find((item) => item.id === state.selectedCustomerId);
   return {
     id: `quote-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     number: `DEMO-${stamp}-${String(state.quotes.length + 1).padStart(3, "0")}`,
+    masterNo: null,
     customerId: state.selectedCustomerId || "", customerPo: "", salesperson: "",
-    workflow: "General", terms: "Net 30", shipVia: "Best way", notes: "", freight: 0, taxRate: 0, lines: [],
+    workflow: "General", terms: "Net 30", shipVia: "Best Way",
+    shipToContact: customer?.contact || "", shipToAddress: customer?.address || "",
+    reqShipDate: "", notes: "", misc: 0, freight: 0, tradeDiscount: 0, lines: [],
     status: "Open",
     originatorInitials: identity?.initials || "", originatorName: identity?.name || "",
     lastModifiedByInitials: identity?.initials || "", lastModifiedByName: identity?.name || "",
@@ -708,6 +713,11 @@ async function pushQuoteToBackend(quote) {
     if (!response.ok) return;
     const data = await response.json().catch(() => ({}));
     state.quotesBackendConfigured = data.configured !== false;
+    if (data.masterNo != null && quote.masterNo == null) {
+      quote.masterNo = data.masterNo;
+      saveQuotes();
+      if (state.activeQuoteId === quote.id && !elements.quoteModal.hidden) renderQuoteModal();
+    }
   } catch {
     // offline or backend unreachable -- the local copy already saved via saveQuotes()
   }
@@ -727,6 +737,7 @@ function startCalibrationQuote(customer) {
       lines: [{
         part: "CAL-SERVICE",
         description: "Automatic hammer calibration service",
+        uom: "EA",
         quantity: 1,
         unitPrice: 0,
         discount: 0,
@@ -1425,19 +1436,20 @@ function clampQuantity(value) {
 function addQuoteLine(part, description, price = 0, source = "MDB demo") {
   const quote = activeQuote();
   if (!quote) { showToast("Open a quote first"); return; }
-  quote.lines.push({ part: part || "", description: description || "", quantity: 1, unitPrice: Number(price) || 0, discount: 0, taxable: false, source });
+  quote.lines.push({ part: part || "", description: description || "", uom: "EA", quantity: 1, unitPrice: Number(price) || 0, discount: 0, taxable: false, source });
   touchQuote(quote);
   showToast(`${part || "Line"} added to quote`);
   if (!elements.quoteModal.hidden) renderQuoteModal();
 }
 
+function lineExtended(line) {
+  return Number(line.quantity || 0) * Number(line.unitPrice || 0) - Number(line.discount || 0);
+}
+
 function quoteTotals(quote) {
-  const subtotal = quote.lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unitPrice || 0), 0);
-  const discount = quote.lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unitPrice || 0) * Number(line.discount || 0) / 100, 0);
-  const taxable = quote.lines.reduce((sum, line) => sum + (line.taxable ? Number(line.quantity || 0) * Number(line.unitPrice || 0) * (1 - Number(line.discount || 0) / 100) : 0), 0);
-  const tax = taxable * Number(quote.taxRate || 0) / 100;
-  const total = subtotal - discount + Number(quote.freight || 0) + tax;
-  return { subtotal, discount, taxable, tax, total };
+  const subtotal = quote.lines.reduce((sum, line) => sum + lineExtended(line), 0);
+  const total = subtotal + Number(quote.misc || 0) + Number(quote.freight || 0) - Number(quote.tradeDiscount || 0);
+  return { subtotal, total };
 }
 
 function quoteCompanyName(quote) {
@@ -1497,12 +1509,15 @@ function renderQuoteSearchResults() {
     : '<p class="advanced-search-empty">No matches.</p>';
 }
 
+const paymentTermsOptions = ["Net 30", "Net 60", "Credit Card", "Prepay", "COD"];
+const shipViaOptions = ["Best Way", "Next Day Air", "NDA Early AM", "Second Day Air", "INTL", "Freight"];
+
 function renderQuoteModal() {
   const quote = activeQuote();
   if (!quote) return;
   const totals = quoteTotals(quote);
   elements.quoteModalTitle.textContent = `${quote.number} — ${quoteCompanyName(quote)}`;
-  elements.quoteModalBody.innerHTML = `<div class="quote-context"><div><span>${escapeHTML(quote.workflow || "General")} quote</span><strong>${escapeHTML(quoteCompanyName(quote))}</strong></div>
+  elements.quoteModalBody.innerHTML = `<div class="quote-context"><div><span>${escapeHTML(quote.workflow || "General")} quote</span><strong>${escapeHTML(quoteCompanyName(quote))}</strong>${quote.masterNo ? `<small>Master No. ${escapeHTML(String(quote.masterNo))}</small>` : ""}</div>
       <label class="field quote-status-field"><span>Status</span><select data-quote-meta-field="status">${["Open", "Won", "Lost", "Archived"].map((option) => `<option ${option === quote.status ? "selected" : ""}>${option}</option>`).join("")}</select></label>
     </div>
     <p class="quote-attribution">Originated by ${escapeHTML(quote.originatorName || "Unknown")}${quote.originatorInitials ? ` (${escapeHTML(quote.originatorInitials)})` : ""} · Last edited by ${escapeHTML(quote.lastModifiedByName || "Unknown")} ${quote.lastModifiedAt ? new Date(quote.lastModifiedAt).toLocaleString() : ""}</p>
@@ -1517,10 +1532,15 @@ function renderQuoteModal() {
           <label class="field"><span>Quote #</span><input data-quote-meta-field="number" value="${escapeHTML(quote.number)}"></label>
           <label class="field"><span>Customer PO / Ref</span><input data-quote-meta-field="customerPo" value="${escapeHTML(quote.customerPo)}"></label>
           <label class="field"><span>Salesperson</span><input data-quote-meta-field="salesperson" value="${escapeHTML(quote.salesperson)}"></label>
-          <label class="field"><span>Terms</span><input data-quote-meta-field="terms" value="${escapeHTML(quote.terms)}"></label>
-          <label class="field"><span>Ship Via</span><input data-quote-meta-field="shipVia" value="${escapeHTML(quote.shipVia)}"></label>
+          <label class="field"><span>Payment Terms</span><select data-quote-meta-field="terms">${paymentTermsOptions.map((option) => `<option ${option === quote.terms ? "selected" : ""}>${option}</option>`).join("")}</select></label>
+          <label class="field"><span>Shipping Method</span><select data-quote-meta-field="shipVia">${shipViaOptions.map((option) => `<option ${option === quote.shipVia ? "selected" : ""}>${option}</option>`).join("")}</select></label>
+          <label class="field"><span>Req Ship Date</span><input type="date" data-quote-meta-field="reqShipDate" value="${escapeHTML(quote.reqShipDate || "")}"></label>
         </div>
-        <div class="quote-lines"><div class="quote-line quote-line--header"><span>Part</span><span>Description</span><span>Qty</span><span>Unit Price</span><span>Disc %</span><span>Tax</span><span>Extended</span><span></span></div>
+        <div class="quote-fields quote-fields--shipto">
+          <label class="field"><span>Ship To Contact</span><input data-quote-meta-field="shipToContact" value="${escapeHTML(quote.shipToContact || "")}"></label>
+          <label class="field field--wide"><span>Ship To Address</span><input data-quote-meta-field="shipToAddress" value="${escapeHTML(quote.shipToAddress || "")}"></label>
+        </div>
+        <div class="quote-lines"><div class="quote-line quote-line--header"><span>Part</span><span>Description</span><span>UOM</span><span>Qty</span><span>Unit Price</span><span>Discount</span><span>Tax</span><span>Extended</span><span></span></div>
           <div id="quoteLineRows">${renderQuoteLines(quote)}</div>
           <button class="secondary-button" type="button" data-quote-add-line>Add Blank Line</button>
         </div>
@@ -1528,10 +1548,10 @@ function renderQuoteModal() {
       </section>
       <aside class="quote-summary"><h3>Quote Summary</h3>
         <div class="summary-row"><span>Subtotal</span><strong id="quoteSubtotal">${formatCurrency(totals.subtotal)}</strong></div>
-        <div class="summary-row"><span>Line discounts</span><strong id="quoteDiscount">-${formatCurrency(totals.discount)}</strong></div>
+        <label class="summary-input"><span>Misc</span><input type="number" min="0" step="0.01" data-quote-meta-field="misc" value="${quote.misc}"></label>
         <label class="summary-input"><span>Freight</span><input type="number" min="0" step="0.01" data-quote-meta-field="freight" value="${quote.freight}"></label>
-        <label class="summary-input"><span>Tax rate %</span><input type="number" min="0" step="0.01" data-quote-meta-field="taxRate" value="${quote.taxRate}"></label>
-        <div class="summary-row"><span>Tax</span><strong id="quoteTax">${formatCurrency(totals.tax)}</strong></div>
+        <label class="summary-input"><span>Trade Discount</span><input type="number" min="0" step="0.01" data-quote-meta-field="tradeDiscount" value="${quote.tradeDiscount}"></label>
+        <div class="summary-row"><span>Tax</span><span class="quote-tax-note">Calculated by GP</span></div>
         <div class="summary-row total"><span>Total</span><strong id="quoteTotal">${formatCurrency(totals.total)}</strong></div>
         <p class="quote-state">Every edit here saves and is visible to the whole team.</p>
       </aside>
@@ -1556,19 +1576,17 @@ function renderRigSpecsWorkspace(options = {}) {
 
 function renderQuoteLines(quote) {
   if (!quote.lines.length) return '<div class="quote-empty">No lines yet. Search above to add Tooling or Rig Parts.</div>';
-  return quote.lines.map((line, index) => {
-    const extended = Number(line.quantity || 0) * Number(line.unitPrice || 0) * (1 - Number(line.discount || 0) / 100);
-    return `<div class="quote-line" data-line-index="${index}">
+  return quote.lines.map((line, index) => `<div class="quote-line" data-line-index="${index}">
       <input class="line-input" data-line-field="part" value="${escapeHTML(line.part)}" aria-label="Part number">
       <input class="line-input line-description" data-line-field="description" value="${escapeHTML(line.description)}" aria-label="Description">
+      <input class="line-input line-uom" data-line-field="uom" value="${escapeHTML(line.uom || "EA")}" aria-label="Unit of measure">
       <input class="line-input" type="number" min="1" max="5000" step="1" data-line-field="quantity" value="${line.quantity}" aria-label="Quantity">
       <input class="line-input" type="number" min="0" step="0.01" data-line-field="unitPrice" value="${line.unitPrice}" aria-label="Unit price">
-      <input class="line-input" type="number" min="0" max="100" step="0.1" data-line-field="discount" value="${line.discount}" aria-label="Discount percent">
+      <input class="line-input" type="number" min="0" step="0.01" data-line-field="discount" value="${line.discount}" aria-label="Discount amount">
       <input type="checkbox" data-line-field="taxable" ${line.taxable ? "checked" : ""} aria-label="Taxable">
-      <strong class="line-extended">${formatCurrency(extended)}</strong>
+      <strong class="line-extended">${formatCurrency(lineExtended(line))}</strong>
       <button class="line-remove" type="button" data-line-remove="${index}" aria-label="Remove line">×</button>
-    </div>`;
-  }).join("");
+    </div>`).join("");
 }
 
 function updateQuoteNumbers() {
@@ -1576,12 +1594,10 @@ function updateQuoteNumbers() {
   if (!quote) return;
   const totals = quoteTotals(quote);
   $("#quoteSubtotal") && ($("#quoteSubtotal").textContent = formatCurrency(totals.subtotal));
-  $("#quoteDiscount") && ($("#quoteDiscount").textContent = `-${formatCurrency(totals.discount)}`);
-  $("#quoteTax") && ($("#quoteTax").textContent = formatCurrency(totals.tax));
   $("#quoteTotal") && ($("#quoteTotal").textContent = formatCurrency(totals.total));
   $$(".quote-line[data-line-index]").forEach((row) => {
     const line = quote.lines[Number(row.dataset.lineIndex)];
-    $(".line-extended", row).textContent = formatCurrency(Number(line.quantity || 0) * Number(line.unitPrice || 0) * (1 - Number(line.discount || 0) / 100));
+    $(".line-extended", row).textContent = formatCurrency(lineExtended(line));
   });
 }
 
@@ -2306,7 +2322,7 @@ elements.quoteModalBody.addEventListener("change", (event) => {
   }
 });
 elements.quoteModalBody.addEventListener("click", (event) => {
-  if (event.target.closest("[data-quote-add-line]")) { const quote = activeQuote(); if (!quote) return; quote.lines.push({ part: "", description: "", quantity: 1, unitPrice: 0, discount: 0, taxable: false, source: "Manual" }); touchQuote(quote); renderQuoteModal(); return; }
+  if (event.target.closest("[data-quote-add-line]")) { const quote = activeQuote(); if (!quote) return; quote.lines.push({ part: "", description: "", uom: "EA", quantity: 1, unitPrice: 0, discount: 0, taxable: false, source: "Manual" }); touchQuote(quote); renderQuoteModal(); return; }
   const remove = event.target.closest("[data-line-remove]");
   if (remove) { const quote = activeQuote(); if (!quote) return; quote.lines.splice(Number(remove.dataset.lineRemove), 1); touchQuote(quote); renderQuoteModal(); return; }
   const searchAdd = event.target.closest("[data-quote-search-add-part]");

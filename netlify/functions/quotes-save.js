@@ -6,6 +6,12 @@
 // Lines are replaced wholesale (delete then reinsert) rather than diffed --
 // quotes have a handful of lines, so this is simple and safe rather than
 // tracking per-line inserts/updates/deletes.
+//
+// master_no is only ever set by the client once it's already known (i.e. a
+// quote the server has already assigned a number to). On first creation the
+// field is omitted so Postgres applies its own nextval() default, and the
+// resulting value is returned to the caller so the frontend can remember it
+// for every future edit of that same quote.
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -33,7 +39,6 @@ exports.handler = async (event) => {
     apikey: SUPABASE_SERVICE_KEY,
     Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
     "Content-Type": "application/json",
-    Prefer: "resolution=merge-duplicates,return=minimal",
   };
 
   const quoteRow = {
@@ -44,10 +49,14 @@ exports.handler = async (event) => {
     salesperson: quote.salesperson || "",
     workflow: quote.workflow || "General",
     terms: quote.terms || "Net 30",
-    ship_via: quote.shipVia || "Best way",
+    ship_via: quote.shipVia || "Best Way",
+    ship_to_contact: quote.shipToContact || "",
+    ship_to_address: quote.shipToAddress || "",
+    req_ship_date: quote.reqShipDate || null,
     notes: quote.notes || "",
+    misc: Number(quote.misc) || 0,
     freight: Number(quote.freight) || 0,
-    tax_rate: Number(quote.taxRate) || 0,
+    trade_discount: Number(quote.tradeDiscount) || 0,
     status: quote.status || "Open",
     originator_initials: quote.originatorInitials || "",
     originator_name: quote.originatorName || "",
@@ -56,21 +65,23 @@ exports.handler = async (event) => {
     created_at: quote.createdAt || new Date().toISOString(),
     last_modified_at: quote.lastModifiedAt || new Date().toISOString(),
   };
+  if (quote.masterNo != null) quoteRow.master_no = quote.masterNo;
 
   try {
     const upsertResponse = await fetch(`${SUPABASE_URL}/rest/v1/quotes?on_conflict=id`, {
       method: "POST",
-      headers,
+      headers: { ...headers, Prefer: "resolution=merge-duplicates,return=representation" },
       body: JSON.stringify(quoteRow),
     });
     if (!upsertResponse.ok) {
       const detail = await upsertResponse.text();
       return { statusCode: 502, body: JSON.stringify({ saved: false, error: detail }) };
     }
+    const [savedRow] = await upsertResponse.json();
 
     await fetch(`${SUPABASE_URL}/rest/v1/quote_lines?quote_id=eq.${encodeURIComponent(quote.id)}`, {
       method: "DELETE",
-      headers,
+      headers: { ...headers, Prefer: "return=minimal" },
     });
 
     const lines = Array.isArray(quote.lines) ? quote.lines : [];
@@ -80,6 +91,7 @@ exports.handler = async (event) => {
         sort_order: index,
         part: line.part || "",
         description: line.description || "",
+        uom: line.uom || "EA",
         quantity: Math.min(5000, Math.max(1, Math.round(Number(line.quantity)) || 1)),
         unit_price: Number(line.unitPrice) || 0,
         discount: Number(line.discount) || 0,
@@ -88,7 +100,7 @@ exports.handler = async (event) => {
       }));
       const linesResponse = await fetch(`${SUPABASE_URL}/rest/v1/quote_lines`, {
         method: "POST",
-        headers,
+        headers: { ...headers, Prefer: "return=minimal" },
         body: JSON.stringify(lineRows),
       });
       if (!linesResponse.ok) {
@@ -97,7 +109,7 @@ exports.handler = async (event) => {
       }
     }
 
-    return { statusCode: 200, body: JSON.stringify({ saved: true }) };
+    return { statusCode: 200, body: JSON.stringify({ saved: true, masterNo: savedRow?.master_no ?? null }) };
   } catch (error) {
     return { statusCode: 502, body: JSON.stringify({ saved: false, error: String(error) }) };
   }
