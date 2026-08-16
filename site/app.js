@@ -50,6 +50,8 @@ const state = {
   searchIndex: [],
   toolItems: [],
   quotes: [],
+  quotesBackendConfigured: false,
+  quoteSaveTimer: null,
   rigQuoteFiles: {},
   stock: {},
   touches: {},
@@ -656,7 +658,26 @@ function newQuote(overrides = {}) {
   };
 }
 
-function loadQuotes() {
+async function loadQuotes() {
+  try {
+    const response = await fetch("/.netlify/functions/quotes-list");
+    if (response.ok) {
+      const data = await response.json();
+      if (data.configured) {
+        state.quotes = data.quotes;
+        state.quotesBackendConfigured = true;
+        saveQuotes();
+        return;
+      }
+    }
+  } catch {
+    // backend unreachable -- fall through to the local copy
+  }
+  state.quotesBackendConfigured = false;
+  loadQuotesFromLocal();
+}
+
+function loadQuotesFromLocal() {
   const saved = safeLoad("mdb-demo-quotes", null);
   if (Array.isArray(saved)) { state.quotes = saved; return; }
   const legacy = safeLoad("mdb-demo-quote", null);
@@ -675,6 +696,21 @@ function loadQuotes() {
 
 function saveQuotes() {
   safeSave("mdb-demo-quotes", state.quotes);
+}
+
+async function pushQuoteToBackend(quote) {
+  try {
+    const response = await fetch("/.netlify/functions/quotes-save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(quote),
+    });
+    if (!response.ok) return;
+    const data = await response.json().catch(() => ({}));
+    state.quotesBackendConfigured = data.configured !== false;
+  } catch {
+    // offline or backend unreachable -- the local copy already saved via saveQuotes()
+  }
 }
 
 function requireIdentity(callback) {
@@ -700,7 +736,7 @@ function startCalibrationQuote(customer) {
     });
     quote.number = `CAL-${quote.number}`;
     state.quotes.unshift(quote);
-    saveQuotes();
+    touchQuote(quote);
     openWorkspace("quotes");
     openQuoteModal(quote.id);
     showToast(`Clean calibration quote started${customer ? ` for ${customer.name}` : ""}`);
@@ -752,7 +788,7 @@ async function loadData() {
   ]);
   state.stock = safeLoad("mdb-demo-stock", {});
   state.touches = safeLoad("mdb-demo-touches", {});
-  loadQuotes();
+  await loadQuotes();
   loadRigSalesOpportunities();
   state.identity = safeLoad("mdb-demo-identity", null) || safeLoad("mdb-demo-calib-identity", null);
   state.calibResults = safeLoad("mdb-demo-calib-results", []);
@@ -992,7 +1028,7 @@ function openWorkspace(type, options = {}) {
     state.customerTooling = { query: "", scope: "All", builder: "", filters: {}, selectedId: "", browseOpen: false };
     renderCustomerToolingWorkspace(customer);
   }
-  if (type === "quotes") renderQuoteWorkspace();
+  if (type === "quotes") { renderQuoteWorkspace(); if (state.quotesBackendConfigured) loadQuotes().then(() => { if (state.activeWorkspace === "quotes") renderQuoteWorkspace(); }); }
   if (type === "inventory") renderInventoryWorkspace(options.query || "");
   if (type === "bom") renderBomWorkspace(options);
   if (type === "rigSpecs") renderRigSpecsWorkspace(options);
@@ -1376,6 +1412,8 @@ function touchQuote(quote) {
   quote.lastModifiedAt = new Date().toISOString();
   if (state.identity) { quote.lastModifiedByInitials = state.identity.initials; quote.lastModifiedByName = state.identity.name; }
   saveQuotes();
+  clearTimeout(state.quoteSaveTimer);
+  state.quoteSaveTimer = setTimeout(() => pushQuoteToBackend(quote), 600);
 }
 
 function clampQuantity(value) {
@@ -1427,7 +1465,7 @@ function renderQuoteWorkspace() {
   const openQuotes = sortedOpenQuotes();
   const mine = state.identity ? openQuotes.filter((quote) => quote.originatorInitials === state.identity.initials) : [];
   elements.overlayBody.innerHTML = `<div class="workbench quotes-workbench">
-    <div class="operations-toolbar"><div><strong>Quotes</strong><span>Shared team drafts — browser-local for this demo, not synced across devices, not sent to GP.</span></div><button type="button" class="primary-button" data-quote-new>Start New Quote</button></div>
+    <div class="operations-toolbar"><div><strong>Quotes</strong><span>${state.quotesBackendConfigured ? "Synced live across the team — not sent to GP." : "Browser-local only right now — not yet synced across devices, not sent to GP."}</span></div><button type="button" class="primary-button" data-quote-new>Start New Quote</button></div>
     ${renderQuoteListSection("All Open Quotes", openQuotes, "master")}
     ${renderQuoteListSection("My Quotes", mine, "mine")}
   </div>`;
@@ -2193,7 +2231,7 @@ elements.overlayBody.addEventListener("click", (event) => {
     requireIdentity(() => {
       const quote = newQuote();
       state.quotes.unshift(quote);
-      saveQuotes();
+      touchQuote(quote);
       renderQuoteWorkspace();
       openQuoteModal(quote.id);
     });
