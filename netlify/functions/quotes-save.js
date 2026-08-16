@@ -91,6 +91,7 @@ exports.handler = async (event) => {
         sort_order: index,
         part: line.part || "",
         description: line.description || "",
+        category: line.category || "",
         uom: line.uom || "EA",
         quantity: Math.min(5000, Math.max(1, Math.round(Number(line.quantity)) || 1)),
         unit_price: Number(line.unitPrice) || 0,

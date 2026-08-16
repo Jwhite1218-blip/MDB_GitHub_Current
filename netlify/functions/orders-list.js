@@ -25,6 +25,10 @@ function toCamelOrder(row) {
     misc: Number(row.misc),
     freight: Number(row.freight),
     tradeDiscount: Number(row.trade_discount),
+    weightLbs: Number(row.weight_lbs),
+    lengthIn: Number(row.length_in),
+    widthIn: Number(row.width_in),
+    heightIn: Number(row.height_in),
     status: row.status,
     originatorInitials: row.originator_initials,
     originatorName: row.originator_name,
@@ -37,6 +41,7 @@ function toCamelOrder(row) {
       .map((line) => ({
         part: line.part,
         description: line.description,
+        category: line.category,
         uom: line.uom,
         quantity: line.quantity,
         shippedQty: line.shipped_qty,

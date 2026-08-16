@@ -8,8 +8,8 @@
       content="Mobile Drill Brain operational workspace demo."
     >
     <title>Mobile Drill Brain</title>
-    <link rel="stylesheet" href="styles.css?v=20260816-3">
-    <script src="app.js?v=20260816-3" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260816-4">
+    <script src="app.js?v=20260816-4" defer></script>
   </head>
 
   <body>
@@ -63,6 +63,11 @@
         <button type="button" data-open="calibrationTraining"><span class="workspace-nav-icon" aria-hidden="true">CT</span><span>Calibration Training</span></button>
         <button type="button" data-open="workflowTraining"><span class="workspace-nav-icon" aria-hidden="true">WT</span><span>Workflow Training</span></button>
       </div>
+
+      <div class="workspace-nav-group" data-admin-only hidden>
+        <strong>Admin</strong>
+        <button type="button" data-open="reports"><span class="workspace-nav-icon" aria-hidden="true">$</span><span>Sales Reports</span></button>
+      </div>
     </nav>
 
     <main id="mainContent" class="application">
@@ -111,6 +116,12 @@
               <button type="button" data-open="callList"><span class="quick-icon" aria-hidden="true">D</span><span>Daily Call List</span></button>
               <button type="button" data-open="calibrationTraining"><span class="quick-icon" aria-hidden="true">CT</span><span>Calibration Training</span></button>
               <button type="button" data-open="workflowTraining"><span class="quick-icon" aria-hidden="true">WT</span><span>Workflow Training</span></button>
+            </nav>
+          </section>
+          <section data-admin-only hidden>
+            <h2>Admin</h2>
+            <nav class="quick-nav quick-nav--two" aria-label="Admin workspaces">
+              <button type="button" data-open="reports"><span class="quick-icon" aria-hidden="true">$</span><span>Sales Reports</span></button>
             </nav>
           </section>
         </div>

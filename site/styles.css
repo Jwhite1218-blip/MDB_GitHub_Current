@@ -1067,6 +1067,32 @@ button {
   font-size: 0.78rem;
 }
 
+.quote-fields--dims {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.shipping-rate-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.shipping-rate-actions select {
+  min-height: 31px;
+  padding: 4px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+}
+
+.shipping-rate-status {
+  margin: 4px 0 0;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-style: italic;
+}
+
 .quote-context small {
   display: block;
   margin-top: 2px;
@@ -3310,6 +3336,97 @@ button:disabled {
 .quotes-workbench {
   display: grid;
   gap: 14px;
+}
+
+.reports-workbench {
+  display: grid;
+  gap: 14px;
+}
+
+.report-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--ink-soft);
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.report-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.report-stat-card {
+  padding: 14px 16px;
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--mobile-drill-blue);
+  border-radius: var(--radius);
+}
+
+.report-stat-label {
+  display: block;
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.report-stat-value {
+  display: block;
+  margin-top: 4px;
+  font-size: 1.4rem;
+}
+
+.report-stat-change {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.report-stat-change.is-up {
+  color: #1a7a3c;
+}
+
+.report-stat-change.is-down {
+  color: #b3261e;
+}
+
+.report-stat-compare {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+}
+
+.report-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.report-detail-card {
+  padding: 14px 16px;
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.report-detail-card h3 {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+}
+
+.report-detail-card p {
+  margin: 4px 0;
+  font-size: 0.82rem;
 }
 
 .quote-list-section {

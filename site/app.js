@@ -94,6 +94,8 @@ const state = {
   bom: { serial: "2025023", section: "", query: "", selectedPart: "" },
   toastTimer: null,
   searchTimer: null,
+  reports: null,
+  reportsLoading: false,
 };
 
 const purchaseTemplates = [
@@ -693,6 +695,7 @@ function newOrder(overrides = {}) {
     terms: "Net 30", shipVia: "Best Way",
     shipToContact: customer?.contact || "", shipToAddress: customer?.address || "",
     reqShipDate: "", notes: "", misc: 0, freight: 0, tradeDiscount: 0, lines: [],
+    weightLbs: 0, lengthIn: 0, widthIn: 0, heightIn: 0,
     status: "Open",
     originatorInitials: identity?.initials || "", originatorName: identity?.name || "",
     lastModifiedByInitials: identity?.initials || "", lastModifiedByName: identity?.name || "",
@@ -1225,6 +1228,7 @@ function openWorkspace(type, options = {}) {
     tooling: "Tooling", customerTooling: "Customer Tooling", quotes: "Quote Builder", orders: "Orders", inventory: "Inventory", bom: "Rig / BOM View", rigSpecs: "Rig Specifications",
     calibration: "Calibration", rigSales: "Rig Sales", prospects: "New Prospect Search", callList: "Daily Call List",
     calibrationTraining: "Calibration Training", workflowTraining: "Workflow Training",
+    reports: "Sales Reports",
   };
   elements.overlayTitle.textContent = titles[type] || "Workspace";
   setActiveNav(type === "customerTooling" ? "customer" : type);
@@ -1247,6 +1251,7 @@ function openWorkspace(type, options = {}) {
   if (type === "callList") renderCallListWorkspace();
   if (type === "calibrationTraining") renderCalibrationTrainingWorkspace();
   if (type === "workflowTraining") renderWorkflowTrainingWorkspace();
+  if (type === "reports") { renderReportsWorkspace(); loadReports().then(() => { if (state.activeWorkspace === "reports") renderReportsWorkspace(); }); }
 }
 
 function closeWorkspace() {
@@ -1261,6 +1266,7 @@ let identityPickerCallback = null;
 
 function updateIdentityButton() {
   elements.identityButton.textContent = state.identity ? `${state.identity.name} (${state.identity.initials})` : "Set your name";
+  $$('[data-admin-only]').forEach((element) => { element.hidden = !state.identity?.isAdmin; });
 }
 
 function openIdentityPicker(onSelected) {
@@ -1631,10 +1637,10 @@ function clampQuantity(value) {
   return Math.min(5000, Math.max(1, number));
 }
 
-function addQuoteLine(part, description, price = 0, source = "MDB demo") {
+function addQuoteLine(part, description, price = 0, source = "MDB demo", category = "") {
   const quote = activeQuote();
   if (!quote) { showToast("Open a quote first"); return; }
-  quote.lines.push({ part: part || "", description: description || "", uom: "EA", quantity: 1, unitPrice: Number(price) || 0, discount: 0, taxable: false, source });
+  quote.lines.push({ part: part || "", description: description || "", category, uom: "EA", quantity: 1, unitPrice: Number(price) || 0, discount: 0, taxable: false, source });
   touchQuote(quote);
   showToast(`${part || "Line"} added to quote`);
   if (!elements.quoteModal.hidden) renderQuoteModal();
@@ -1744,6 +1750,35 @@ function orderTotals(order) {
   return { subtotal, total };
 }
 
+async function fetchShippingRate() {
+  const order = activeOrder();
+  if (!order) return;
+  const carrier = $("#orderRateCarrier")?.value || "UPS";
+  const statusHost = $("#orderRateStatus");
+  if (statusHost) statusHost.textContent = "Looking up rate...";
+  const destZip = (order.shipToAddress.match(/\b\d{5}(-\d{4})?\b/) || [""])[0];
+  if (!destZip) { if (statusHost) statusHost.textContent = "Add a Ship To Address with a zip code first."; return; }
+  try {
+    const response = await fetch("/.netlify/functions/shipping-rate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        carrier, shipVia: order.shipVia, destZip,
+        weightLbs: order.weightLbs, lengthIn: order.lengthIn, widthIn: order.widthIn, heightIn: order.heightIn,
+      }),
+    });
+    const data = await response.json();
+    if (!data.configured) { if (statusHost) statusHost.textContent = `${carrier} rates aren't configured yet.`; return; }
+    if (!data.available) { if (statusHost) statusHost.textContent = data.reason || "No rate available for this combination."; return; }
+    order.freight = data.rate;
+    touchOrder(order);
+    renderOrderModal();
+    showToast(`Rate applied: ${formatCurrency(data.rate)}`);
+  } catch {
+    if (statusHost) statusHost.textContent = "Rate lookup failed.";
+  }
+}
+
 function renderOrderListSection(title, orders, sectionKey) {
   const open = state.orderListOpen[sectionKey];
   return `<section class="quote-list-section">
@@ -1763,6 +1798,66 @@ function renderOrdersWorkspace() {
     <div class="operations-toolbar"><div><strong>Orders</strong><span>${state.ordersBackendConfigured ? "Synced live across the team — not sent to GP." : "Browser-local only right now — not yet synced across devices, not sent to GP."}</span></div><button type="button" class="primary-button" data-order-new>Start New Order</button></div>
     ${renderOrderListSection("All Open Orders", openOrders, "master")}
     ${renderOrderListSection("My Orders", mine, "mine")}
+  </div>`;
+}
+
+function reportsChangeLabel(current, previous) {
+  if (!previous) return current > 0 ? "New activity" : "No prior-year data";
+  const pct = ((current - previous) / previous) * 100;
+  return `${pct >= 0 ? "▲" : "▼"} ${Math.abs(pct).toFixed(1)}%`;
+}
+
+function reportsStatCard(label, current, previous, currentLabel, previousLabel) {
+  return `<div class="report-stat-card">
+    <span class="report-stat-label">${label}</span>
+    <strong class="report-stat-value">${formatCurrency(current)}</strong>
+    <span class="report-stat-change ${current >= previous ? "is-up" : "is-down"}">${reportsChangeLabel(current, previous)}</span>
+    <div class="report-stat-compare"><span>${currentLabel}: ${formatCurrency(current)}</span><span>${previousLabel}: ${formatCurrency(previous)}</span></div>
+  </div>`;
+}
+
+async function loadReports() {
+  state.reportsLoading = true;
+  try {
+    const response = await fetch("/.netlify/functions/reports-summary");
+    state.reports = response.ok ? await response.json() : { configured: false };
+  } catch {
+    state.reports = { configured: false };
+  } finally {
+    state.reportsLoading = false;
+  }
+}
+
+function renderReportsWorkspace() {
+  const data = state.reports;
+  if (state.reportsLoading && !data) {
+    elements.overlayBody.innerHTML = `<div class="workbench"><p class="report-empty">Loading report data...</p></div>`;
+    return;
+  }
+  if (!data || !data.configured) {
+    elements.overlayBody.innerHTML = `<div class="workbench"><p class="report-empty">Reports need the live database connected — once Orders are syncing through Supabase, revenue numbers show up here automatically. Nothing to summarize yet.</p></div>`;
+    return;
+  }
+  elements.overlayBody.innerHTML = `<div class="workbench reports-workbench">
+    <div class="operations-toolbar"><div><strong>Sales Reports</strong><span>V1 — revenue is order total (subtotal + misc + freight − trade discount), as of ${new Date(data.asOf).toLocaleString()}.</span></div></div>
+    <div class="report-stat-grid">
+      ${reportsStatCard("Year to Date", data.ytd.revenue, data.ytdLastYear.revenue, "This year", "Last year")}
+      ${reportsStatCard("This Month", data.month.revenue, data.monthLastYear.revenue, "This month", "Same month last year")}
+      ${reportsStatCard("Tooling Revenue (YTD)", data.ytd.tooling.revenue, data.ytdLastYear.tooling.revenue, "This year", "Last year")}
+    </div>
+    <div class="report-detail-grid">
+      <div class="report-detail-card">
+        <h3>Order Volume</h3>
+        <p>YTD: ${data.ytd.orderCount} orders (${data.ytdLastYear.orderCount} last year)</p>
+        <p>This month: ${data.month.orderCount} orders (${data.monthLastYear.orderCount} same month last year)</p>
+      </div>
+      <div class="report-detail-card">
+        <h3>Tooling Quantity Shipped</h3>
+        <p>YTD: ${data.ytd.tooling.qty.toLocaleString()} units (${data.ytdLastYear.tooling.qty.toLocaleString()} last year)</p>
+        <p>This month: ${data.month.tooling.qty.toLocaleString()} units (${data.monthLastYear.tooling.qty.toLocaleString()} same month last year)</p>
+        <p class="quote-tax-note">Tooling growth flags production scheduling — rising Tooling qty means rising in-house build demand.</p>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -1788,14 +1883,14 @@ function renderOrderSearchResults() {
   const rigMatches = state.data.rig.items.map((item) => ({ part: item.part, description: item.cleanDescription || item.description, id: item.part, score: matchScore(term, `${item.part} ${item.cleanDescription || item.description}`), kind: "rig" }));
   const results = [...toolingMatches, ...rigMatches].filter((item) => item.score >= 0.5 && item.part).sort((a, b) => b.score - a.score).slice(0, 8);
   host.innerHTML = results.length
-    ? results.map((item) => `<button type="button" class="advanced-search-result" data-order-search-add-part="${escapeHTML(item.part)}" data-order-search-add-description="${escapeHTML(item.description || "")}"><strong>${escapeHTML(item.part)}</strong><span>${escapeHTML(item.description || "")} · ${item.kind === "rig" ? "Rig Parts" : "Tooling"}</span></button>`).join("")
+    ? results.map((item) => `<button type="button" class="advanced-search-result" data-order-search-add-part="${escapeHTML(item.part)}" data-order-search-add-description="${escapeHTML(item.description || "")}" data-order-search-add-category="${item.kind === "rig" ? "Rig Parts" : "Tooling"}"><strong>${escapeHTML(item.part)}</strong><span>${escapeHTML(item.description || "")} · ${item.kind === "rig" ? "Rig Parts" : "Tooling"}</span></button>`).join("")
     : '<p class="advanced-search-empty">No matches.</p>';
 }
 
-function addOrderLine(part, description, price = 0, source = "MDB demo") {
+function addOrderLine(part, description, price = 0, source = "MDB demo", category = "") {
   const order = activeOrder();
   if (!order) { showToast("Open an order first"); return; }
-  const line = { part: part || "", description: description || "", uom: "EA", quantity: 1, shippedQty: 0, backorderQty: 0, unitPrice: Number(price) || 0, discount: 0, taxable: false, source };
+  const line = { part: part || "", description: description || "", category, uom: "EA", quantity: 1, shippedQty: 0, backorderQty: 0, unitPrice: Number(price) || 0, discount: 0, taxable: false, source };
   order.lines.push(line);
   applyLineQuantity(line, 1, (accepted) => {
     if (!accepted) { order.lines.pop(); return; }
@@ -1861,6 +1956,12 @@ function renderOrderModal() {
           <label class="field"><span>Ship To Contact</span><input data-order-meta-field="shipToContact" value="${escapeHTML(order.shipToContact || "")}"></label>
           <label class="field field--wide"><span>Ship To Address</span><input data-order-meta-field="shipToAddress" value="${escapeHTML(order.shipToAddress || "")}"></label>
         </div>
+        <div class="quote-fields quote-fields--dims">
+          <label class="field"><span>Weight (lbs)</span><input type="number" min="0" step="0.1" data-order-meta-field="weightLbs" value="${order.weightLbs}"></label>
+          <label class="field"><span>Length (in)</span><input type="number" min="0" step="0.1" data-order-meta-field="lengthIn" value="${order.lengthIn}"></label>
+          <label class="field"><span>Width (in)</span><input type="number" min="0" step="0.1" data-order-meta-field="widthIn" value="${order.widthIn}"></label>
+          <label class="field"><span>Height (in)</span><input type="number" min="0" step="0.1" data-order-meta-field="heightIn" value="${order.heightIn}"></label>
+        </div>
         <div class="order-lines"><div class="order-line order-line--header"><span>Part</span><span>Description</span><span>UOM</span><span>Ordered</span><span>Shipped</span><span>B/O</span><span>Unit Price</span><span>Discount</span><span>Tax</span><span>Extended</span><span></span></div>
           <div id="orderLineRows">${renderOrderLines(order)}</div>
           <button class="secondary-button" type="button" data-order-add-line>Add Blank Line</button>
@@ -1871,6 +1972,11 @@ function renderOrderModal() {
         <div class="summary-row"><span>Subtotal</span><strong id="orderSubtotal">${formatCurrency(totals.subtotal)}</strong></div>
         <label class="summary-input"><span>Misc</span><input type="number" min="0" step="0.01" data-order-meta-field="misc" value="${order.misc}"></label>
         <label class="summary-input"><span>Freight</span><input type="number" min="0" step="0.01" data-order-meta-field="freight" value="${order.freight}"></label>
+        <div class="shipping-rate-actions">
+          <select id="orderRateCarrier"><option value="UPS">UPS</option><option value="FEDEX">FedEx</option></select>
+          <button type="button" class="small-button" data-order-get-rate>Get Rate</button>
+        </div>
+        <p id="orderRateStatus" class="shipping-rate-status"></p>
         <label class="summary-input"><span>Trade Discount</span><input type="number" min="0" step="0.01" data-order-meta-field="tradeDiscount" value="${order.tradeDiscount}"></label>
         <div class="summary-row"><span>Tax</span><span class="quote-tax-note">Calculated by GP</span></div>
         <div class="summary-row total"><span>Total</span><strong id="orderTotal">${formatCurrency(totals.total)}</strong></div>
@@ -1889,7 +1995,7 @@ function renderQuoteSearchResults() {
   const rigMatches = state.data.rig.items.map((item) => ({ part: item.part, description: item.cleanDescription || item.description, id: item.part, score: matchScore(term, `${item.part} ${item.cleanDescription || item.description}`), kind: "rig" }));
   const results = [...toolingMatches, ...rigMatches].filter((item) => item.score >= 0.5 && item.part).sort((a, b) => b.score - a.score).slice(0, 8);
   host.innerHTML = results.length
-    ? results.map((item) => `<button type="button" class="advanced-search-result" data-quote-search-add-part="${escapeHTML(item.part)}" data-quote-search-add-description="${escapeHTML(item.description || "")}"><strong>${escapeHTML(item.part)}</strong><span>${escapeHTML(item.description || "")} · ${item.kind === "rig" ? "Rig Parts" : "Tooling"}</span></button>`).join("")
+    ? results.map((item) => `<button type="button" class="advanced-search-result" data-quote-search-add-part="${escapeHTML(item.part)}" data-quote-search-add-description="${escapeHTML(item.description || "")}" data-quote-search-add-category="${item.kind === "rig" ? "Rig Parts" : "Tooling"}"><strong>${escapeHTML(item.part)}</strong><span>${escapeHTML(item.description || "")} · ${item.kind === "rig" ? "Rig Parts" : "Tooling"}</span></button>`).join("")
     : '<p class="advanced-search-empty">No matches.</p>';
 }
 
@@ -2732,7 +2838,7 @@ elements.quoteModalBody.addEventListener("click", (event) => {
   const remove = event.target.closest("[data-line-remove]");
   if (remove) { const quote = activeQuote(); if (!quote) return; quote.lines.splice(Number(remove.dataset.lineRemove), 1); touchQuote(quote); renderQuoteModal(); return; }
   const searchAdd = event.target.closest("[data-quote-search-add-part]");
-  if (searchAdd) { addQuoteLine(searchAdd.dataset.quoteSearchAddPart, searchAdd.dataset.quoteSearchAddDescription); return; }
+  if (searchAdd) { addQuoteLine(searchAdd.dataset.quoteSearchAddPart, searchAdd.dataset.quoteSearchAddDescription, 0, "MDB demo", searchAdd.dataset.quoteSearchAddCategory); return; }
   if (event.target.closest("[data-quote-convert-to-order]")) {
     const quote = activeQuote();
     if (!quote) return;
@@ -2802,7 +2908,8 @@ elements.orderModalBody.addEventListener("click", (event) => {
   const remove = event.target.closest("[data-line-remove]");
   if (remove) { const order = activeOrder(); if (!order) return; order.lines.splice(Number(remove.dataset.lineRemove), 1); touchOrder(order); renderOrderModal(); return; }
   const searchAdd = event.target.closest("[data-order-search-add-part]");
-  if (searchAdd) { addOrderLine(searchAdd.dataset.orderSearchAddPart, searchAdd.dataset.orderSearchAddDescription); return; }
+  if (searchAdd) { addOrderLine(searchAdd.dataset.orderSearchAddPart, searchAdd.dataset.orderSearchAddDescription, 0, "MDB demo", searchAdd.dataset.orderSearchAddCategory); return; }
+  if (event.target.closest("[data-order-get-rate]")) { fetchShippingRate(); return; }
 });
 
 elements.advancedSearchButton.addEventListener("click", openAdvancedSearch);

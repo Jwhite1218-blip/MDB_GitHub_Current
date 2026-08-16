@@ -37,6 +37,7 @@ function toCamelQuote(row) {
       .map((line) => ({
         part: line.part,
         description: line.description,
+        category: line.category,
         uom: line.uom,
         quantity: line.quantity,
         unitPrice: Number(line.unit_price),

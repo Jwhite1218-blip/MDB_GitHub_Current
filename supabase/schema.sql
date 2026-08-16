@@ -46,6 +46,7 @@ create table if not exists quote_lines (
   sort_order int not null default 0,
   part text not null default '',
   description text not null default '',
+  category text not null default '',
   uom text not null default 'EA',
   quantity int not null default 1 check (quantity between 1 and 5000),
   unit_price numeric not null default 0,
@@ -78,6 +79,10 @@ create table if not exists orders (
   misc numeric not null default 0,
   freight numeric not null default 0,
   trade_discount numeric not null default 0,
+  weight_lbs numeric not null default 0,
+  length_in numeric not null default 0,
+  width_in numeric not null default 0,
+  height_in numeric not null default 0,
   status text not null default 'Open' check (status in ('Open', 'Closed')),
   originator_initials text not null default '',
   originator_name text not null default '',
@@ -93,6 +98,7 @@ create table if not exists order_lines (
   sort_order int not null default 0,
   part text not null default '',
   description text not null default '',
+  category text not null default '',
   uom text not null default 'EA',
   quantity int not null default 1 check (quantity between 1 and 5000),
   shipped_qty int not null default 0,
@@ -104,6 +110,7 @@ create table if not exists order_lines (
 );
 
 create index if not exists order_lines_order_id_idx on order_lines (order_id);
+create index if not exists order_lines_category_idx on order_lines (category);
 create index if not exists orders_status_idx on orders (status);
 create index if not exists orders_created_at_idx on orders (created_at desc);
 
