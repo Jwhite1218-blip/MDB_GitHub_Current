@@ -8,8 +8,8 @@
       content="Mobile Drill Brain operational workspace demo."
     >
     <title>Mobile Drill Brain</title>
-    <link rel="stylesheet" href="styles.css?v=20260815-2">
-    <script src="app.js?v=20260815-2" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260816-2">
+    <script src="app.js?v=20260816-2" defer></script>
   </head>
 
   <body>
@@ -25,6 +25,7 @@
         >
       </button>
       <div class="app-banner-actions">
+        <button id="identityButton" class="advanced-search-trigger" type="button">Set your name</button>
         <button id="advancedSearchButton" class="advanced-search-trigger" type="button">Advanced Search</button>
         <span class="demo-pill">MDB Demo</span>
       </div>
@@ -191,6 +192,26 @@
       </header>
       <div id="overlayBody" class="overlay-body"></div>
     </section>
+
+    <div id="identityModal" class="popup-modal" hidden>
+      <div class="popup-panel">
+        <header>
+          <h2 id="identityModalTitle">Who are you?</h2>
+          <button id="identityModalClose" class="close-button" type="button" aria-label="Close">&#215;</button>
+        </header>
+        <div id="identityModalBody" class="popup-body"></div>
+      </div>
+    </div>
+
+    <div id="quoteModal" class="popup-modal" hidden>
+      <div class="popup-panel popup-panel--wide">
+        <header>
+          <h2 id="quoteModalTitle">Quote</h2>
+          <button id="quoteModalClose" class="close-button" type="button" aria-label="Close quote">&#215;</button>
+        </header>
+        <div id="quoteModalBody" class="popup-body"></div>
+      </div>
+    </div>
 
     <div id="advancedSearchModal" class="advanced-search-modal" hidden>
       <div class="advanced-search-panel" role="dialog" aria-modal="true" aria-label="Advanced search">

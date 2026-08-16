@@ -30,6 +30,15 @@ const elements = {
   advancedSearchButton: $("#advancedSearchButton"),
   advancedSearchModal: $("#advancedSearchModal"),
   advancedSearchClose: $("#advancedSearchClose"),
+  identityButton: $("#identityButton"),
+  identityModal: $("#identityModal"),
+  identityModalClose: $("#identityModalClose"),
+  identityModalTitle: $("#identityModalTitle"),
+  identityModalBody: $("#identityModalBody"),
+  quoteModal: $("#quoteModal"),
+  quoteModalClose: $("#quoteModalClose"),
+  quoteModalTitle: $("#quoteModalTitle"),
+  quoteModalBody: $("#quoteModalBody"),
 };
 
 const state = {
@@ -40,7 +49,7 @@ const state = {
   selectedCustomerId: null,
   searchIndex: [],
   toolItems: [],
-  quote: null,
+  quotes: [],
   rigQuoteFiles: {},
   stock: {},
   touches: {},
@@ -50,13 +59,17 @@ const state = {
   prospectParams: { territory: "Midwest", market: "All", radius: "100", keywords: "drilling geotechnical", visual: true },
   workflowTraining: { scenarioId: "first-call", messages: [], matchedKcs: ["KC001"] },
   activeCalibrationScenario: "",
-  calibIdentity: null,
+  identity: null,
   calibAdminUnlocked: false,
   calibView: "scenarios",
   calibResults: [],
   calibLocks: {},
   advancedSearch: { type: "tooling", field: "description", operator: "contains", value: "" },
   advSearchTimer: null,
+  quoteListOpen: { master: true, mine: true },
+  activeQuoteId: "",
+  quoteSearchTerm: "",
+  quoteSearchTimer: null,
   rigSalesEditor: null,
   calibrationCustomerId: "",
   rigSpecModel: "B25",
@@ -548,8 +561,8 @@ function saveRigSalesOpportunities() {
   safeSave("mdb-demo-rig-sales-opportunities", rigSalesOpportunities);
 }
 
-function saveCalibIdentity() {
-  safeSave("mdb-demo-calib-identity", state.calibIdentity);
+function saveIdentity() {
+  safeSave("mdb-demo-identity", state.identity);
 }
 
 function saveCalibResults() {
@@ -626,33 +639,72 @@ function viewRigQuoteFile(opportunityId) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
-function newQuote() {
+function newQuote(overrides = {}) {
   const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  const identity = state.identity;
+  const now = new Date().toISOString();
   return {
-    number: `DEMO-${stamp}`, customerId: state.selectedCustomerId || "", customerPo: "", salesperson: "",
-    workflow: "General", terms: "Net 30", shipVia: "Best way", notes: "", freight: 0, taxRate: 0, lines: [], savedAt: "",
+    id: `quote-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    number: `DEMO-${stamp}-${String(state.quotes.length + 1).padStart(3, "0")}`,
+    customerId: state.selectedCustomerId || "", customerPo: "", salesperson: "",
+    workflow: "General", terms: "Net 30", shipVia: "Best way", notes: "", freight: 0, taxRate: 0, lines: [],
+    status: "Open",
+    originatorInitials: identity?.initials || "", originatorName: identity?.name || "",
+    lastModifiedByInitials: identity?.initials || "", lastModifiedByName: identity?.name || "",
+    createdAt: now, lastModifiedAt: now,
+    ...overrides,
   };
 }
 
+function loadQuotes() {
+  const saved = safeLoad("mdb-demo-quotes", null);
+  if (Array.isArray(saved)) { state.quotes = saved; return; }
+  const legacy = safeLoad("mdb-demo-quote", null);
+  const now = new Date().toISOString();
+  state.quotes = legacy && Array.isArray(legacy.lines) ? [{
+    id: `quote-${Date.now()}-legacy`,
+    number: legacy.number || "LEGACY-DRAFT",
+    customerId: legacy.customerId || "", customerPo: legacy.customerPo || "", salesperson: legacy.salesperson || "",
+    workflow: legacy.workflow || "General", terms: legacy.terms || "Net 30", shipVia: legacy.shipVia || "Best way",
+    notes: legacy.notes || "", freight: legacy.freight || 0, taxRate: legacy.taxRate || 0, lines: legacy.lines || [],
+    status: "Open", originatorInitials: "", originatorName: "Legacy draft", lastModifiedByInitials: "", lastModifiedByName: "",
+    createdAt: now, lastModifiedAt: now,
+  }] : [];
+  saveQuotes();
+}
+
+function saveQuotes() {
+  safeSave("mdb-demo-quotes", state.quotes);
+}
+
+function requireIdentity(callback) {
+  if (state.identity) { callback(); return; }
+  openIdentityPicker(callback);
+}
+
 function startCalibrationQuote(customer) {
-  const quote = newQuote();
-  quote.workflow = "Calibration";
-  quote.number = `CAL-${quote.number}`;
-  quote.customerId = customer?.id || "";
-  quote.notes = `Calibration quote for ${customer?.name || "selected customer"}. Started from the Calibration workspace.`;
-  quote.lines = [{
-    part: "CAL-SERVICE",
-    description: "Automatic hammer calibration service",
-    quantity: 1,
-    unitPrice: 0,
-    discount: 0,
-    taxable: false,
-    source: "Calibration workspace",
-  }];
-  state.quote = quote;
-  safeSave("mdb-demo-quote", state.quote);
-  openWorkspace("quotes");
-  showToast(`Clean calibration quote started${customer ? ` for ${customer.name}` : ""}`);
+  requireIdentity(() => {
+    const quote = newQuote({
+      workflow: "Calibration",
+      customerId: customer?.id || "",
+      notes: `Calibration quote for ${customer?.name || "selected customer"}. Started from the Calibration workspace.`,
+      lines: [{
+        part: "CAL-SERVICE",
+        description: "Automatic hammer calibration service",
+        quantity: 1,
+        unitPrice: 0,
+        discount: 0,
+        taxable: false,
+        source: "Calibration workspace",
+      }],
+    });
+    quote.number = `CAL-${quote.number}`;
+    state.quotes.unshift(quote);
+    saveQuotes();
+    openWorkspace("quotes");
+    openQuoteModal(quote.id);
+    showToast(`Clean calibration quote started${customer ? ` for ${customer.name}` : ""}`);
+  });
 }
 
 function stockSeed(part) {
@@ -700,9 +752,9 @@ async function loadData() {
   ]);
   state.stock = safeLoad("mdb-demo-stock", {});
   state.touches = safeLoad("mdb-demo-touches", {});
-  state.quote = safeLoad("mdb-demo-quote", null) || newQuote();
+  loadQuotes();
   loadRigSalesOpportunities();
-  state.calibIdentity = safeLoad("mdb-demo-calib-identity", null);
+  state.identity = safeLoad("mdb-demo-identity", null) || safeLoad("mdb-demo-calib-identity", null);
   state.calibResults = safeLoad("mdb-demo-calib-results", []);
   state.calibLocks = safeLoad("mdb-demo-calib-locks", {});
   state.rigQuoteFiles = await loadRigQuoteFiles();
@@ -860,8 +912,6 @@ function selectCustomer(customerId) {
   const customer = customers.find((item) => item.id === customerId);
   if (!customer) return;
   state.selectedCustomerId = customerId;
-  state.quote.customerId = customerId;
-  safeSave("mdb-demo-quote", state.quote);
   elements.customerSearchInput.value = customer.name;
   renderCustomerList(elements.directoryFilter.value);
   renderCustomerProfile(customer);
@@ -960,6 +1010,36 @@ function closeWorkspace() {
   elements.workspaceOverlay.classList.remove("workspace-overlay--customer-tooling");
   elements.overlayBody.innerHTML = "";
   setActiveNav(state.activeView === "customer" ? "customer" : "home");
+}
+
+let identityPickerCallback = null;
+
+function updateIdentityButton() {
+  elements.identityButton.textContent = state.identity ? `${state.identity.name} (${state.identity.initials})` : "Set your name";
+}
+
+function openIdentityPicker(onSelected) {
+  identityPickerCallback = typeof onSelected === "function" ? onSelected : null;
+  elements.identityModalTitle.textContent = state.identity ? "Switch user" : "Who are you?";
+  elements.identityModalBody.innerHTML = `<div class="calib-roster-grid">${calibrationReps.map((rep) => `<button type="button" data-identity-select-rep="${escapeHTML(rep.initials)}"><strong>${escapeHTML(rep.name)}</strong><span>${escapeHTML(rep.initials)}${rep.isAdmin ? " · Admin" : ""}</span></button>`).join("")}</div>`;
+  elements.identityModal.hidden = false;
+}
+
+function closeIdentityPicker() {
+  elements.identityModal.hidden = true;
+  identityPickerCallback = null;
+}
+
+function selectIdentity(initials) {
+  const rep = calibrationReps.find((item) => item.initials === initials);
+  if (!rep) return;
+  state.identity = { ...rep };
+  state.calibAdminUnlocked = false;
+  saveIdentity();
+  updateIdentityButton();
+  const callback = identityPickerCallback;
+  closeIdentityPicker();
+  if (callback) callback();
 }
 
 function openAdvancedSearch() {
@@ -1288,55 +1368,137 @@ function customerOptions(selected) {
   return `<option value="">No customer selected</option>${customers.map((customer) => `<option value="${customer.id}" ${customer.id === selected ? "selected" : ""}>${escapeHTML(customer.name)}</option>`).join("")}`;
 }
 
-function addQuoteLine(part, description, price = 0, source = "MDB demo") {
-  if (!state.quote) state.quote = newQuote();
-  state.quote.lines.push({ part: part || "", description: description || "", quantity: 1, unitPrice: Number(price) || 0, discount: 0, taxable: false, source });
-  safeSave("mdb-demo-quote", state.quote);
-  showToast(`${part || "Line"} added to quote`);
+function activeQuote() {
+  return state.quotes.find((quote) => quote.id === state.activeQuoteId) || null;
 }
 
-function quoteTotals() {
-  const subtotal = state.quote.lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unitPrice || 0), 0);
-  const discount = state.quote.lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unitPrice || 0) * Number(line.discount || 0) / 100, 0);
-  const taxable = state.quote.lines.reduce((sum, line) => sum + (line.taxable ? Number(line.quantity || 0) * Number(line.unitPrice || 0) * (1 - Number(line.discount || 0) / 100) : 0), 0);
-  const tax = taxable * Number(state.quote.taxRate || 0) / 100;
-  const total = subtotal - discount + Number(state.quote.freight || 0) + tax;
+function touchQuote(quote) {
+  quote.lastModifiedAt = new Date().toISOString();
+  if (state.identity) { quote.lastModifiedByInitials = state.identity.initials; quote.lastModifiedByName = state.identity.name; }
+  saveQuotes();
+}
+
+function clampQuantity(value) {
+  const number = Math.round(Number(value));
+  if (!Number.isFinite(number)) return 1;
+  return Math.min(5000, Math.max(1, number));
+}
+
+function addQuoteLine(part, description, price = 0, source = "MDB demo") {
+  const quote = activeQuote();
+  if (!quote) { showToast("Open a quote first"); return; }
+  quote.lines.push({ part: part || "", description: description || "", quantity: 1, unitPrice: Number(price) || 0, discount: 0, taxable: false, source });
+  touchQuote(quote);
+  showToast(`${part || "Line"} added to quote`);
+  if (!elements.quoteModal.hidden) renderQuoteModal();
+}
+
+function quoteTotals(quote) {
+  const subtotal = quote.lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unitPrice || 0), 0);
+  const discount = quote.lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unitPrice || 0) * Number(line.discount || 0) / 100, 0);
+  const taxable = quote.lines.reduce((sum, line) => sum + (line.taxable ? Number(line.quantity || 0) * Number(line.unitPrice || 0) * (1 - Number(line.discount || 0) / 100) : 0), 0);
+  const tax = taxable * Number(quote.taxRate || 0) / 100;
+  const total = subtotal - discount + Number(quote.freight || 0) + tax;
   return { subtotal, discount, taxable, tax, total };
 }
 
+function quoteCompanyName(quote) {
+  const customer = customers.find((item) => item.id === quote.customerId);
+  return customer?.name || "No customer selected";
+}
+
+function sortedOpenQuotes() {
+  return state.quotes.filter((quote) => quote.status === "Open").sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+function renderQuoteListSection(title, quotes, sectionKey) {
+  const open = state.quoteListOpen[sectionKey];
+  return `<section class="quote-list-section">
+    <button type="button" class="quote-list-toggle" data-quote-list-toggle="${sectionKey}">
+      <span>${escapeHTML(title)} (${quotes.length})</span><span class="quote-list-caret">${open ? "▾" : "▸"}</span>
+    </button>
+    ${open ? (quotes.length
+      ? `<div class="quote-list-rows">${quotes.map((quote) => `<button type="button" class="quote-list-row" data-quote-open="${quote.id}"><strong>${escapeHTML(quoteCompanyName(quote))}</strong><span>${escapeHTML(quote.number)}</span></button>`).join("")}</div>`
+      : '<p class="quote-list-empty">No open quotes yet.</p>') : ""}
+  </section>`;
+}
+
 function renderQuoteWorkspace() {
-  if (!state.quote) state.quote = newQuote();
-  const totals = quoteTotals();
-  const workflow = state.quote.workflow || "General";
-  const customer = customers.find((item) => item.id === state.quote.customerId);
-  elements.overlayBody.innerHTML = `<div class="quote-context"><div><span>${escapeHTML(workflow)} quote</span><strong>${escapeHTML(customer?.name || "No customer selected")}</strong></div><small>This is a clean, browser-local working draft.</small></div><div class="quote-layout">
-    <section class="quote-form">
-      <div class="quote-fields">
-        <label class="field"><span>Customer</span><select data-quote-field="customerId">${customerOptions(state.quote.customerId)}</select></label>
-        <label class="field"><span>Quote #</span><input data-quote-field="number" value="${escapeHTML(state.quote.number)}"></label>
-        <label class="field"><span>Customer PO / Ref</span><input data-quote-field="customerPo" value="${escapeHTML(state.quote.customerPo)}"></label>
-        <label class="field"><span>Salesperson</span><input data-quote-field="salesperson" value="${escapeHTML(state.quote.salesperson)}"></label>
-        <label class="field"><span>Terms</span><input data-quote-field="terms" value="${escapeHTML(state.quote.terms)}"></label>
-        <label class="field"><span>Ship Via</span><input data-quote-field="shipVia" value="${escapeHTML(state.quote.shipVia)}"></label>
-      </div>
-      <div class="quote-lines"><div class="quote-line quote-line--header"><span>Part</span><span>Description</span><span>Qty</span><span>Unit Price</span><span>Disc %</span><span>Tax</span><span>Extended</span><span></span></div>
-        <div id="quoteLineRows">${renderQuoteLines()}</div>
-        <button class="secondary-button" type="button" data-quote-add-line>Add Blank Line</button>
-      </div>
-      <label class="field quote-notes"><span>Internal demo notes</span><textarea data-quote-field="notes" rows="4">${escapeHTML(state.quote.notes)}</textarea></label>
-    </section>
-    <aside class="quote-summary"><h3>Quote Summary</h3>
-      <div class="summary-row"><span>Subtotal</span><strong id="quoteSubtotal">${formatCurrency(totals.subtotal)}</strong></div>
-      <div class="summary-row"><span>Line discounts</span><strong id="quoteDiscount">-${formatCurrency(totals.discount)}</strong></div>
-      <label class="summary-input"><span>Freight</span><input type="number" min="0" step="0.01" data-quote-field="freight" value="${state.quote.freight}"></label>
-      <label class="summary-input"><span>Tax rate %</span><input type="number" min="0" step="0.01" data-quote-field="taxRate" value="${state.quote.taxRate}"></label>
-      <div class="summary-row"><span>Tax</span><strong id="quoteTax">${formatCurrency(totals.tax)}</strong></div>
-      <div class="summary-row total"><span>Total</span><strong id="quoteTotal">${formatCurrency(totals.total)}</strong></div>
-      <button class="primary-button" type="button" data-quote-save>Save Browser Draft</button>
-      <button class="secondary-button quote-secondary" type="button" data-quote-new>Start New Quote</button>
-      <p class="quote-state">${state.quote.savedAt ? `Saved in this browser ${escapeHTML(state.quote.savedAt)}` : "Not saved yet"}</p>
-      <p class="quote-state">One working draft only · not shared · not sent to GP</p>
-    </aside></div>`;
+  const openQuotes = sortedOpenQuotes();
+  const mine = state.identity ? openQuotes.filter((quote) => quote.originatorInitials === state.identity.initials) : [];
+  elements.overlayBody.innerHTML = `<div class="workbench quotes-workbench">
+    <div class="operations-toolbar"><div><strong>Quotes</strong><span>Shared team drafts — browser-local for this demo, not synced across devices, not sent to GP.</span></div><button type="button" class="primary-button" data-quote-new>Start New Quote</button></div>
+    ${renderQuoteListSection("All Open Quotes", openQuotes, "master")}
+    ${renderQuoteListSection("My Quotes", mine, "mine")}
+  </div>`;
+}
+
+function openQuoteModal(quoteId) {
+  state.activeQuoteId = quoteId;
+  state.quoteSearchTerm = "";
+  renderQuoteModal();
+  elements.quoteModal.hidden = false;
+}
+
+function closeQuoteModal() {
+  elements.quoteModal.hidden = true;
+  state.activeQuoteId = "";
+  if (state.activeWorkspace === "quotes") renderQuoteWorkspace();
+}
+
+function renderQuoteSearchResults() {
+  const host = $("#quoteSearchResults");
+  if (!host) return;
+  const term = state.quoteSearchTerm.trim();
+  if (!term) { host.innerHTML = ""; return; }
+  const toolingMatches = state.toolItems.map((item) => ({ ...item, score: matchScore(term, `${item.part} ${item.description}`), kind: "tooling" }));
+  const rigMatches = state.data.rig.items.map((item) => ({ part: item.part, description: item.cleanDescription || item.description, id: item.part, score: matchScore(term, `${item.part} ${item.cleanDescription || item.description}`), kind: "rig" }));
+  const results = [...toolingMatches, ...rigMatches].filter((item) => item.score >= 0.5 && item.part).sort((a, b) => b.score - a.score).slice(0, 8);
+  host.innerHTML = results.length
+    ? results.map((item) => `<button type="button" class="advanced-search-result" data-quote-search-add-part="${escapeHTML(item.part)}" data-quote-search-add-description="${escapeHTML(item.description || "")}"><strong>${escapeHTML(item.part)}</strong><span>${escapeHTML(item.description || "")} · ${item.kind === "rig" ? "Rig Parts" : "Tooling"}</span></button>`).join("")
+    : '<p class="advanced-search-empty">No matches.</p>';
+}
+
+function renderQuoteModal() {
+  const quote = activeQuote();
+  if (!quote) return;
+  const totals = quoteTotals(quote);
+  elements.quoteModalTitle.textContent = `${quote.number} — ${quoteCompanyName(quote)}`;
+  elements.quoteModalBody.innerHTML = `<div class="quote-context"><div><span>${escapeHTML(quote.workflow || "General")} quote</span><strong>${escapeHTML(quoteCompanyName(quote))}</strong></div>
+      <label class="field quote-status-field"><span>Status</span><select data-quote-meta-field="status">${["Open", "Won", "Lost", "Archived"].map((option) => `<option ${option === quote.status ? "selected" : ""}>${option}</option>`).join("")}</select></label>
+    </div>
+    <p class="quote-attribution">Originated by ${escapeHTML(quote.originatorName || "Unknown")}${quote.originatorInitials ? ` (${escapeHTML(quote.originatorInitials)})` : ""} · Last edited by ${escapeHTML(quote.lastModifiedByName || "Unknown")} ${quote.lastModifiedAt ? new Date(quote.lastModifiedAt).toLocaleString() : ""}</p>
+    <div class="quote-search-wrap">
+      <label class="field"><span>Search Tooling &amp; Rig Parts to add</span><input type="text" id="quoteSearchInput" autocomplete="off" spellcheck="false" placeholder="Part number or description..." value="${escapeHTML(state.quoteSearchTerm)}"></label>
+      <div id="quoteSearchResults" class="quote-search-results"></div>
+    </div>
+    <div class="quote-layout">
+      <section class="quote-form">
+        <div class="quote-fields">
+          <label class="field"><span>Customer</span><select data-quote-meta-field="customerId">${customerOptions(quote.customerId)}</select></label>
+          <label class="field"><span>Quote #</span><input data-quote-meta-field="number" value="${escapeHTML(quote.number)}"></label>
+          <label class="field"><span>Customer PO / Ref</span><input data-quote-meta-field="customerPo" value="${escapeHTML(quote.customerPo)}"></label>
+          <label class="field"><span>Salesperson</span><input data-quote-meta-field="salesperson" value="${escapeHTML(quote.salesperson)}"></label>
+          <label class="field"><span>Terms</span><input data-quote-meta-field="terms" value="${escapeHTML(quote.terms)}"></label>
+          <label class="field"><span>Ship Via</span><input data-quote-meta-field="shipVia" value="${escapeHTML(quote.shipVia)}"></label>
+        </div>
+        <div class="quote-lines"><div class="quote-line quote-line--header"><span>Part</span><span>Description</span><span>Qty</span><span>Unit Price</span><span>Disc %</span><span>Tax</span><span>Extended</span><span></span></div>
+          <div id="quoteLineRows">${renderQuoteLines(quote)}</div>
+          <button class="secondary-button" type="button" data-quote-add-line>Add Blank Line</button>
+        </div>
+        <label class="field quote-notes"><span>Internal demo notes</span><textarea data-quote-meta-field="notes" rows="4">${escapeHTML(quote.notes)}</textarea></label>
+      </section>
+      <aside class="quote-summary"><h3>Quote Summary</h3>
+        <div class="summary-row"><span>Subtotal</span><strong id="quoteSubtotal">${formatCurrency(totals.subtotal)}</strong></div>
+        <div class="summary-row"><span>Line discounts</span><strong id="quoteDiscount">-${formatCurrency(totals.discount)}</strong></div>
+        <label class="summary-input"><span>Freight</span><input type="number" min="0" step="0.01" data-quote-meta-field="freight" value="${quote.freight}"></label>
+        <label class="summary-input"><span>Tax rate %</span><input type="number" min="0" step="0.01" data-quote-meta-field="taxRate" value="${quote.taxRate}"></label>
+        <div class="summary-row"><span>Tax</span><strong id="quoteTax">${formatCurrency(totals.tax)}</strong></div>
+        <div class="summary-row total"><span>Total</span><strong id="quoteTotal">${formatCurrency(totals.total)}</strong></div>
+        <p class="quote-state">Every edit here saves and is visible to the whole team.</p>
+      </aside>
+    </div>`;
+  renderQuoteSearchResults();
 }
 
 function renderRigSpecsWorkspace(options = {}) {
@@ -1354,14 +1516,14 @@ function renderRigSpecsWorkspace(options = {}) {
   </div>`;
 }
 
-function renderQuoteLines() {
-  if (!state.quote.lines.length) return '<div class="quote-empty">No lines yet. Add from Tooling, Rig/BOM, or Inventory.</div>';
-  return state.quote.lines.map((line, index) => {
+function renderQuoteLines(quote) {
+  if (!quote.lines.length) return '<div class="quote-empty">No lines yet. Search above to add Tooling or Rig Parts.</div>';
+  return quote.lines.map((line, index) => {
     const extended = Number(line.quantity || 0) * Number(line.unitPrice || 0) * (1 - Number(line.discount || 0) / 100);
     return `<div class="quote-line" data-line-index="${index}">
       <input class="line-input" data-line-field="part" value="${escapeHTML(line.part)}" aria-label="Part number">
       <input class="line-input line-description" data-line-field="description" value="${escapeHTML(line.description)}" aria-label="Description">
-      <input class="line-input" type="number" min="0" step="1" data-line-field="quantity" value="${line.quantity}" aria-label="Quantity">
+      <input class="line-input" type="number" min="1" max="5000" step="1" data-line-field="quantity" value="${line.quantity}" aria-label="Quantity">
       <input class="line-input" type="number" min="0" step="0.01" data-line-field="unitPrice" value="${line.unitPrice}" aria-label="Unit price">
       <input class="line-input" type="number" min="0" max="100" step="0.1" data-line-field="discount" value="${line.discount}" aria-label="Discount percent">
       <input type="checkbox" data-line-field="taxable" ${line.taxable ? "checked" : ""} aria-label="Taxable">
@@ -1372,13 +1534,15 @@ function renderQuoteLines() {
 }
 
 function updateQuoteNumbers() {
-  const totals = quoteTotals();
+  const quote = activeQuote();
+  if (!quote) return;
+  const totals = quoteTotals(quote);
   $("#quoteSubtotal") && ($("#quoteSubtotal").textContent = formatCurrency(totals.subtotal));
   $("#quoteDiscount") && ($("#quoteDiscount").textContent = `-${formatCurrency(totals.discount)}`);
   $("#quoteTax") && ($("#quoteTax").textContent = formatCurrency(totals.tax));
   $("#quoteTotal") && ($("#quoteTotal").textContent = formatCurrency(totals.total));
   $$(".quote-line[data-line-index]").forEach((row) => {
-    const line = state.quote.lines[Number(row.dataset.lineIndex)];
+    const line = quote.lines[Number(row.dataset.lineIndex)];
     $(".line-extended", row).textContent = formatCurrency(Number(line.quantity || 0) * Number(line.unitPrice || 0) * (1 - Number(line.discount || 0) / 100));
   });
 }
@@ -1558,9 +1722,9 @@ function renderCallListWorkspace() {
 }
 
 function renderCalibrationTrainingWorkspace() {
-  if (calibIdentityGateEnabled && !state.calibIdentity) { renderCalibIdentityPicker(); return; }
+  if (calibIdentityGateEnabled && !state.identity) { openIdentityPicker(renderCalibrationTrainingWorkspace); return; }
   state.calibView = "scenarios";
-  const identity = calibIdentityGateEnabled ? state.calibIdentity : null;
+  const identity = calibIdentityGateEnabled ? state.identity : null;
   const adminActive = calibIdentityGateEnabled && identity?.isAdmin && state.calibAdminUnlocked;
   elements.overlayBody.innerHTML = `<div class="workbench training-workbench">
     <div class="training-intro"><span>Practice only</span><h3>Calibration Call Training</h3><p>Run the field scenario without touching a real customer, calibration record, or quote. Scored against Module 010's real pass/retrain rules.</p></div>
@@ -1581,13 +1745,6 @@ function renderCalibrationTrainingWorkspace() {
   </div>`;
 }
 
-function renderCalibIdentityPicker() {
-  elements.overlayBody.innerHTML = `<div class="workbench training-workbench">
-    <div class="training-intro"><span>Practice only</span><h3>Calibration Call Training</h3><p>Select your name to begin. Every result is tracked per rep and emailed to jon.white@mobiledrill.net.</p></div>
-    <div class="calib-roster-grid">${calibrationReps.map((rep) => `<button type="button" data-calib-select-rep="${rep.initials}"><strong>${escapeHTML(rep.name)}</strong><span>${escapeHTML(rep.initials)}${rep.isAdmin ? " · Admin" : ""}</span></button>`).join("")}</div>
-  </div>`;
-}
-
 function latestCalibResult(repInitials, scenarioId) {
   return state.calibResults.find((record) => record.repInitials === repInitials && record.scenarioId === scenarioId) || null;
 }
@@ -1605,7 +1762,7 @@ function renderAdminConsole() {
   const rows = state.calibResults;
   elements.overlayBody.innerHTML = `<div class="workbench training-workbench">
     <div class="training-intro"><span>Admin</span><h3>Calibration Training — Admin Console</h3><p>Every submission across every rep. Add notes, set the final decision, and reopen a locked section for retest.</p></div>
-    <div class="calib-identity-bar"><span>Signed in as <strong>${escapeHTML(state.calibIdentity.name)}</strong> · Admin Mode</span><div class="calib-identity-actions"><button type="button" class="secondary-button" data-calib-back-to-scenarios>Back to Scenarios</button></div></div>
+    <div class="calib-identity-bar"><span>Signed in as <strong>${escapeHTML(state.identity.name)}</strong> · Admin Mode</span><div class="calib-identity-actions"><button type="button" class="secondary-button" data-calib-back-to-scenarios>Back to Scenarios</button></div></div>
     ${rows.length ? `<div class="table-scroll"><table class="data-table calib-admin-table"><thead><tr><th>Rep</th><th>Scenario</th><th>Submitted</th><th>Auto result</th><th>Missed items</th><th>Emailed</th><th>Admin decision</th><th>Admin notes</th><th>Lock</th></tr></thead><tbody>${rows.map((record) => `<tr>
       <td>${escapeHTML(record.repName)} (${escapeHTML(record.repInitials)})</td>
       <td>${escapeHTML(record.scenarioTitle)}</td>
@@ -1626,7 +1783,7 @@ function renderTrainingScenario(id) {
   const scenario = calibrationTrainingScenarios.find((item) => item.id === id);
   if (!scenario) { stage.innerHTML = "<strong>Select a practice scenario.</strong>"; return; }
   state.activeCalibrationScenario = id;
-  const identity = state.calibIdentity;
+  const identity = state.identity;
   const locked = calibIdentityGateEnabled && identity && state.calibLocks[calibLockKey(identity.initials, scenario.id)];
   if (locked) {
     const record = latestCalibResult(identity.initials, scenario.id);
@@ -1718,7 +1875,7 @@ function gradeCalibrationScenario() {
     }
   });
   if (incomplete.length) { showToast("Complete every required action, blank, and ordering step before finishing practice"); return; }
-  const identity = calibIdentityGateEnabled && state.calibIdentity ? state.calibIdentity : { initials: "DEMO", name: "Demo Tester" };
+  const identity = calibIdentityGateEnabled && state.identity ? state.identity : { initials: "DEMO", name: "Demo Tester" };
   const record = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     repInitials: identity.initials,
@@ -1893,20 +2050,6 @@ function handleOverlayInput(event) {
       available.classList.toggle("is-low", count < 1);
     }
   }
-  if (target.matches("[data-quote-field]")) {
-    const field = target.dataset.quoteField;
-    state.quote[field] = target.type === "number" ? Number(target.value) : target.value;
-    safeSave("mdb-demo-quote", state.quote);
-    updateQuoteNumbers();
-  }
-  if (target.matches("[data-line-field]")) {
-    const row = target.closest("[data-line-index]");
-    const line = state.quote.lines[Number(row.dataset.lineIndex)];
-    const field = target.dataset.lineField;
-    line[field] = target.type === "checkbox" ? target.checked : target.type === "number" ? Number(target.value) : target.value;
-    safeSave("mdb-demo-quote", state.quote);
-    updateQuoteNumbers();
-  }
   if (target.matches("[data-calib-admin-notes]")) {
     const record = state.calibResults.find((item) => item.id === target.dataset.calibAdminNotes);
     if (record) { record.adminNotes = target.value; saveCalibResults(); }
@@ -2011,13 +2154,7 @@ elements.overlayBody.addEventListener("click", (event) => {
   const trainingScenario = event.target.closest("[data-training-scenario]");
   if (trainingScenario) { renderTrainingScenario(trainingScenario.dataset.trainingScenario); return; }
   if (event.target.closest("[data-complete-training]")) { gradeCalibrationScenario(); return; }
-  const calibSelectRep = event.target.closest("[data-calib-select-rep]");
-  if (calibSelectRep) {
-    const rep = calibrationReps.find((item) => item.initials === calibSelectRep.dataset.calibSelectRep);
-    if (rep) { state.calibIdentity = { ...rep }; state.calibAdminUnlocked = false; saveCalibIdentity(); renderCalibrationTrainingWorkspace(); }
-    return;
-  }
-  if (event.target.closest("[data-calib-switch-user]")) { state.calibIdentity = null; state.calibAdminUnlocked = false; saveCalibIdentity(); renderCalibrationTrainingWorkspace(); return; }
+  if (event.target.closest("[data-calib-switch-user]")) { openIdentityPicker(renderCalibrationTrainingWorkspace); return; }
   if (event.target.closest("[data-calib-unlock-admin]")) { renderCalibAdminGate(); return; }
   if (event.target.closest("[data-calib-admin-pin-submit]")) {
     const pinValue = $("#calibAdminPinInput")?.value || "";
@@ -2052,17 +2189,91 @@ elements.overlayBody.addEventListener("click", (event) => {
   if (section) { state.bom.section = section.dataset.bomSection; state.bom.query = ""; state.bom.selectedPart = ""; renderBomWorkspace(); return; }
   const part = event.target.closest("[data-bom-part]");
   if (part) { event.preventDefault(); renderBomDetail(part.dataset.bomPart); return; }
-  if (event.target.closest("[data-quote-add-line]")) { addQuoteLine("", "", 0); renderQuoteWorkspace(); return; }
-  const remove = event.target.closest("[data-line-remove]");
-  if (remove) { state.quote.lines.splice(Number(remove.dataset.lineRemove), 1); safeSave("mdb-demo-quote", state.quote); renderQuoteWorkspace(); return; }
-  if (event.target.closest("[data-quote-save]")) { state.quote.savedAt = new Date().toLocaleString(); safeSave("mdb-demo-quote", state.quote); renderQuoteWorkspace(); showToast("Quote draft saved in this browser"); return; }
-  if (event.target.closest("[data-quote-new]")) { state.quote = newQuote(); safeSave("mdb-demo-quote", state.quote); renderQuoteWorkspace(); showToast("New dummy quote started"); }
+  if (event.target.closest("[data-quote-new]")) {
+    requireIdentity(() => {
+      const quote = newQuote();
+      state.quotes.unshift(quote);
+      saveQuotes();
+      renderQuoteWorkspace();
+      openQuoteModal(quote.id);
+    });
+    return;
+  }
+  const quoteListToggle = event.target.closest("[data-quote-list-toggle]");
+  if (quoteListToggle) { const key = quoteListToggle.dataset.quoteListToggle; state.quoteListOpen[key] = !state.quoteListOpen[key]; renderQuoteWorkspace(); return; }
+  const quoteOpen = event.target.closest("[data-quote-open]");
+  if (quoteOpen) { openQuoteModal(quoteOpen.dataset.quoteOpen); }
 });
 
 elements.homeButton.addEventListener("click", showHome);
 elements.customerBackButton.addEventListener("click", showHome);
 elements.overlayBackButton.addEventListener("click", closeWorkspace);
 elements.overlayCloseButton.addEventListener("click", closeWorkspace);
+
+elements.identityButton.addEventListener("click", () => openIdentityPicker());
+elements.identityModalClose.addEventListener("click", closeIdentityPicker);
+elements.identityModal.addEventListener("click", (event) => {
+  if (event.target === elements.identityModal) closeIdentityPicker();
+});
+elements.identityModalBody.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-identity-select-rep]");
+  if (button) selectIdentity(button.dataset.identitySelectRep);
+});
+
+elements.quoteModalClose.addEventListener("click", closeQuoteModal);
+elements.quoteModal.addEventListener("click", (event) => {
+  if (event.target === elements.quoteModal) closeQuoteModal();
+});
+elements.quoteModalBody.addEventListener("input", (event) => {
+  const target = event.target;
+  if (target.id === "quoteSearchInput") {
+    state.quoteSearchTerm = target.value;
+    clearTimeout(state.quoteSearchTimer);
+    state.quoteSearchTimer = setTimeout(renderQuoteSearchResults, 90);
+    return;
+  }
+  const quote = activeQuote();
+  if (!quote) return;
+  if (target.matches("[data-quote-meta-field]")) {
+    const field = target.dataset.quoteMetaField;
+    quote[field] = target.type === "number" ? Number(target.value) : target.value;
+    touchQuote(quote);
+    if (field === "customerId" || field === "number") elements.quoteModalTitle.textContent = `${quote.number} — ${quoteCompanyName(quote)}`;
+    updateQuoteNumbers();
+  }
+  if (target.matches("[data-line-field]")) {
+    const row = target.closest("[data-line-index]");
+    const line = quote.lines[Number(row.dataset.lineIndex)];
+    const field = target.dataset.lineField;
+    line[field] = target.type === "checkbox" ? target.checked : field === "quantity" ? clampQuantity(target.value) : target.type === "number" ? Number(target.value) : target.value;
+    if (field === "quantity" && String(target.value) !== String(line[field])) target.value = line[field];
+    touchQuote(quote);
+    updateQuoteNumbers();
+  }
+});
+elements.quoteModalBody.addEventListener("change", (event) => {
+  const target = event.target;
+  const quote = activeQuote();
+  if (!quote) return;
+  if (target.matches("[data-quote-meta-field]") && target.tagName === "SELECT") {
+    quote[target.dataset.quoteMetaField] = target.value;
+    touchQuote(quote);
+    if (target.dataset.quoteMetaField === "customerId" || target.dataset.quoteMetaField === "status") elements.quoteModalTitle.textContent = `${quote.number} — ${quoteCompanyName(quote)}`;
+    if (target.dataset.quoteMetaField === "status") renderQuoteWorkspace();
+  }
+  if (target.matches("[data-line-field]") && target.type === "number") {
+    const row = target.closest("[data-line-index]");
+    const line = quote.lines[Number(row.dataset.lineIndex)];
+    if (target.dataset.lineField === "quantity") { line.quantity = clampQuantity(target.value); target.value = line.quantity; touchQuote(quote); updateQuoteNumbers(); }
+  }
+});
+elements.quoteModalBody.addEventListener("click", (event) => {
+  if (event.target.closest("[data-quote-add-line]")) { const quote = activeQuote(); if (!quote) return; quote.lines.push({ part: "", description: "", quantity: 1, unitPrice: 0, discount: 0, taxable: false, source: "Manual" }); touchQuote(quote); renderQuoteModal(); return; }
+  const remove = event.target.closest("[data-line-remove]");
+  if (remove) { const quote = activeQuote(); if (!quote) return; quote.lines.splice(Number(remove.dataset.lineRemove), 1); touchQuote(quote); renderQuoteModal(); return; }
+  const searchAdd = event.target.closest("[data-quote-search-add-part]");
+  if (searchAdd) { addQuoteLine(searchAdd.dataset.quoteSearchAddPart, searchAdd.dataset.quoteSearchAddDescription); return; }
+});
 
 elements.advancedSearchButton.addEventListener("click", openAdvancedSearch);
 elements.advancedSearchClose.addEventListener("click", closeAdvancedSearch);
@@ -2156,7 +2367,9 @@ elements.calibrationButton.addEventListener("click", () => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
-    if (!elements.advancedSearchModal.hidden) closeAdvancedSearch();
+    if (!elements.identityModal.hidden) closeIdentityPicker();
+    else if (!elements.quoteModal.hidden) closeQuoteModal();
+    else if (!elements.advancedSearchModal.hidden) closeAdvancedSearch();
     else if (!elements.workspaceOverlay.hidden) closeWorkspace();
     else { hideSearchResults(elements.globalSearchResults, elements.globalSearchInput); hideSearchResults(elements.customerSearchResults, elements.customerSearchInput); }
   }
@@ -2165,9 +2378,11 @@ document.addEventListener("keydown", (event) => {
 async function boot() {
   elements.globalSearchInput.placeholder = "Loading MDB data...";
   renderCustomerList();
+  updateIdentityButton();
   try {
     await loadData();
     elements.globalSearchInput.disabled = false;
+    updateIdentityButton();
   } catch (error) {
     console.error(error);
     elements.globalSearchInput.placeholder = "MDB data did not load";
