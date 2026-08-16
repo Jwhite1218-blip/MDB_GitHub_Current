@@ -107,6 +107,22 @@ create index if not exists order_lines_order_id_idx on order_lines (order_id);
 create index if not exists orders_status_idx on orders (status);
 create index if not exists orders_created_at_idx on orders (created_at desc);
 
+-- Inventory is a SPARSE OVERRIDE table -- a part with no row here just uses
+-- the existing deterministic demo seed (same fake on-hand/allocated/bin/price
+-- for everyone, computed from a hash of the part number, no sync needed). A
+-- row only gets created here once a rep actually edits a part's stock, which
+-- is the one thing that genuinely needs to be shared across the team.
+create table if not exists inventory_stock (
+  part text primary key,
+  on_hand numeric not null default 0,
+  allocated numeric not null default 0,
+  bin text not null default '',
+  unit_price numeric not null default 0,
+  last_modified_by_initials text not null default '',
+  last_modified_by_name text not null default '',
+  last_modified_at timestamptz not null default now()
+);
+
 -- service_role bypasses Row Level Security but NOT ordinary table grants --
 -- these are required even for the service key to read/write these tables.
 grant usage on schema public to service_role;
@@ -114,4 +130,5 @@ grant all on public.quotes to service_role;
 grant all on public.quote_lines to service_role;
 grant all on public.orders to service_role;
 grant all on public.order_lines to service_role;
+grant all on public.inventory_stock to service_role;
 grant usage, select on all sequences in schema public to service_role;

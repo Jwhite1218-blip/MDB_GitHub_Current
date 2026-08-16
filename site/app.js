@@ -61,6 +61,9 @@ const state = {
   orders: [],
   ordersBackendConfigured: false,
   orderSaveTimer: null,
+  inventoryBackendConfigured: false,
+  pendingStockParts: new Set(),
+  stockSaveTimers: {},
   activeOrderId: "",
   orderListOpen: { master: true, mine: true },
   orderSearchTerm: "",
@@ -911,6 +914,56 @@ function saveStock() {
   safeSave("mdb-demo-stock", state.stock);
 }
 
+async function loadInventory() {
+  try {
+    const response = await fetch("/.netlify/functions/inventory-list");
+    if (response.ok) {
+      const data = await response.json();
+      if (data.configured) {
+        for (const [part, record] of Object.entries(data.stock)) {
+          if (!state.pendingStockParts.has(part)) state.stock[part] = record;
+        }
+        state.inventoryBackendConfigured = true;
+        saveStock();
+        return;
+      }
+    }
+  } catch {
+    // backend unreachable -- the deterministic seed / local copy still works
+  }
+  state.inventoryBackendConfigured = false;
+}
+
+function touchStock(part) {
+  saveStock();
+  state.pendingStockParts.add(part);
+  clearTimeout(state.stockSaveTimers[part]);
+  state.stockSaveTimers[part] = setTimeout(() => pushStockToBackend(part), 600);
+}
+
+async function pushStockToBackend(part) {
+  const stock = state.stock[part];
+  try {
+    const response = await fetch("/.netlify/functions/inventory-save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        part,
+        onHand: stock.onHand, allocated: stock.allocated, bin: stock.bin, unitPrice: stock.unitPrice,
+        lastModifiedByInitials: state.identity?.initials || "", lastModifiedByName: state.identity?.name || "",
+      }),
+    });
+    if (response.ok) {
+      const data = await response.json().catch(() => ({}));
+      state.inventoryBackendConfigured = data.configured !== false;
+    }
+  } catch {
+    // offline or backend unreachable -- the local copy already saved via saveStock()
+  } finally {
+    state.pendingStockParts.delete(part);
+  }
+}
+
 function firstPartNumber(value) {
   if (!value || /^(N\/A|GAP|CONFIRMED)/i.test(value)) return "";
   const match = String(value).match(/\b(?:[A-Z]{1,5}-?)?\d{3,}(?:-[A-Z0-9]+)*\b/i);
@@ -940,6 +993,7 @@ async function loadData() {
     getJson("data/rig-parts.json"), getJson("data/tooling.json"),
   ]);
   state.stock = safeLoad("mdb-demo-stock", {});
+  await loadInventory();
   state.touches = safeLoad("mdb-demo-touches", {});
   await loadQuotes();
   await loadOrders();
@@ -1184,7 +1238,7 @@ function openWorkspace(type, options = {}) {
   }
   if (type === "quotes") { renderQuoteWorkspace(); if (state.quotesBackendConfigured) loadQuotes().then(() => { if (state.activeWorkspace === "quotes") renderQuoteWorkspace(); }); }
   if (type === "orders") { renderOrdersWorkspace(); if (state.ordersBackendConfigured) loadOrders().then(() => { if (state.activeWorkspace === "orders") renderOrdersWorkspace(); }); }
-  if (type === "inventory") renderInventoryWorkspace(options.query || "");
+  if (type === "inventory") { renderInventoryWorkspace(options.query || ""); if (state.inventoryBackendConfigured) loadInventory(); }
   if (type === "bom") renderBomWorkspace(options);
   if (type === "rigSpecs") renderRigSpecsWorkspace(options);
   if (type === "calibration") renderCalibrationWorkspace();
@@ -1532,7 +1586,7 @@ function inventorySourceItems() {
 
 function renderInventoryWorkspace(query = "") {
   elements.overlayBody.innerHTML = `<div class="workbench inventory-workbench">
-    <div class="workbench-bar"><label class="inline-search"><span class="search-mark"></span><input id="inventorySearch" type="search" value="${escapeHTML(query)}" placeholder="Search part number or description..."></label><span class="demo-data-label">Editable demo GP fields</span></div>
+    <div class="workbench-bar"><label class="inline-search"><span class="search-mark"></span><input id="inventorySearch" type="search" value="${escapeHTML(query)}" placeholder="Search part number or description..."></label><span class="demo-data-label">${state.inventoryBackendConfigured ? "Edits sync live across the team" : "Browser-local only right now"}</span></div>
     <div id="inventoryResults"></div></div>`;
   renderInventoryResults(query);
 }
@@ -2424,11 +2478,12 @@ function handleOverlayInput(event) {
     if (target.tagName === "SELECT" || event.type === "change") $("#toolBuilderHost").innerHTML = renderToolingBuilder();
   }
   if (target.matches("[data-stock-part]")) {
-    const stock = getStock(target.dataset.stockPart);
+    const part = target.dataset.stockPart;
+    const stock = getStock(part);
     stock[target.dataset.stockField] = target.type === "number" ? Number(target.value) : target.value;
-    saveStock();
+    touchStock(part);
     const row = target.closest("tr");
-    const available = row?.querySelector(`[data-stock-available="${CSS.escape(target.dataset.stockPart)}"]`);
+    const available = row?.querySelector(`[data-stock-available="${CSS.escape(part)}"]`);
     if (available) {
       const count = Number(stock.onHand) - Number(stock.allocated);
       available.textContent = count;
