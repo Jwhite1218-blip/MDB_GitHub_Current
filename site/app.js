@@ -2242,6 +2242,18 @@ async function loadKnownCustomers() {
   state.knownCustomersLoaded = true;
 }
 
+function maskCustomerName(value) {
+  return String(value).replace(/\p{L}+/gu, (word) =>
+    word.length <= 2 ? word[0] + "•".repeat(word.length - 1) : word[0] + "•".repeat(word.length - 2) + word[word.length - 1]
+  );
+}
+
+function maskCustomerNumber(value) {
+  const str = String(value);
+  if (str.length <= 4) return "•".repeat(str.length);
+  return `${str.slice(0, 2)}${"•".repeat(str.length - 4)}${str.slice(-2)}`;
+}
+
 function prospectDuplicateCheck(candidate) {
   if (!state.knownCustomersLoaded) return { label: "Checking...", statusClass: "", detail: "Duplicate check loading..." };
   if (!state.knownCustomersConfigured || !state.knownCustomers.length) {
@@ -2253,10 +2265,10 @@ function prospectDuplicateCheck(candidate) {
     if (!best || score > best.score) best = { score, known };
   }
   if (best && best.score >= 0.85) {
-    return { label: "Existing Customer", statusClass: "status-label--good", detail: `Matched real GP customer record — ${best.known.name} (${best.known.number})`, matched: best.known };
+    return { label: "Existing Customer", statusClass: "status-label--good", detail: `Matched a known customer record — ${maskCustomerName(best.known.name)} (${maskCustomerNumber(best.known.number)})`, matched: best.known };
   }
   if (best && best.score >= 0.55) {
-    return { label: "Possible Duplicate", statusClass: "status-label--warn", detail: `Similar name to known customer ${best.known.name} (${best.known.number}) — review before treating as new.`, matched: best.known };
+    return { label: "Possible Duplicate", statusClass: "status-label--warn", detail: `Similar name to a known customer — ${maskCustomerName(best.known.name)} (${maskCustomerNumber(best.known.number)}) — review before treating as new.`, matched: best.known };
   }
   return { label: "New Prospect", statusClass: "", detail: "No match in known customer records (partial data — Auger sales only, Q1 2024)." };
 }
