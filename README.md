@@ -135,6 +135,10 @@ The current operational demo proves the daily-work foundation:
 9. Editable public-sandbox fields for on-hand, allocated, bin, and unit price across Inventory, BOM detail, and Tooling detail; these edits stay on the visitor's device
 10. A source-derived Item List and Item Card that connect Tooling, Inventory, Quotes, Orders, and serial BOM Where Used records through the same part identity
 11. Calibration-to-quote handoff and persistent browser-local Quote and Order workspaces with quantity, price, discount, freight, and totals
+12. Business Central-style order execution with visible Open, Release, Reserve, Reopen, Ship, Invoice, and Close actions; ordered, available, reserved, shipped, invoiced, and shortage quantities remain distinct
+13. An order activity timeline that records who released, reserved, shipped, invoiced, reopened, or closed the order without changing GP's role as transactional authority
+
+Order entry never deducts inventory. Releasing an order reserves available stock; posting a shipment moves reserved quantity out of on-hand inventory; and invoicing is limited to quantity already shipped. Partial shipments, partial invoices, and shortages stay visible until the order is complete.
 
 The browser demo uses normalized records generated from the repository source set. The B57/B37X BOM hierarchy and tooling catalog depth are real source-derived demo data; current GP verification is still pending wherever the source says so. Inventory quantities, prices, quote values, and customer details remain editable demo values and are not production truth. The site does not load or expose the raw files in repository-level `docs/` or `data/`, and it does not claim live GP pricing, inventory, ordering, or invoicing.
 
