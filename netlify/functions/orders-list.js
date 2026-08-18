@@ -40,6 +40,7 @@ function toCamelOrder(row) {
     lines: (row.order_lines || [])
       .sort((a, b) => a.sort_order - b.sort_order)
       .map((line) => ({
+        itemId: line.item_id,
         part: line.part,
         description: line.description,
         category: line.category,

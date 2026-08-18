@@ -36,6 +36,7 @@ exports.handler = async (event) => {
     const stock = {};
     for (const row of rows) {
       stock[row.part] = {
+        itemId: row.item_id,
         onHand: Number(row.on_hand),
         allocated: Number(row.allocated),
         bin: row.bin,
