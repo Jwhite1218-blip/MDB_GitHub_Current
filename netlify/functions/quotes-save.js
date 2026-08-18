@@ -91,6 +91,7 @@ exports.handler = async (event) => {
     if (lines.length) {
       const lineRows = lines.map((line, index) => ({
         quote_id: quote.id,
+        item_id: Number.isInteger(Number(line.itemId)) && Number(line.itemId) > 0 ? Number(line.itemId) : null,
         sort_order: index,
         part: line.part || "",
         description: line.description || "",

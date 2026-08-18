@@ -13,6 +13,73 @@
 -- space, regardless of which document type draws the next value.
 create sequence if not exists master_no_seq start 80000;
 
+-- One canonical operational record per part number. Tooling compatibility
+-- remains governed by CTS/WS004; this table supplies the shared ERP facts.
+create table if not exists items (
+  id bigint generated always as identity primary key,
+  part_number text not null unique,
+  description text not null default '',
+  item_class text not null default 'Other' check (item_class in ('Tooling', 'Rig Part', 'Tooling + Rig Part', 'Service', 'Assembly', 'Other')),
+  category text not null default '',
+  family text not null default '',
+  subfamily text not null default '',
+  uom text not null default 'EA',
+  status text not null default 'Active' check (status in ('Active', 'Inactive', 'Blocked', 'Review')),
+  revision text not null default '',
+  drawing_number text not null default '',
+  preferred_vendor text not null default '',
+  standard_cost numeric(14,2) not null default 0 check (standard_cost >= 0),
+  list_price numeric(14,2) not null default 0 check (list_price >= 0),
+  weight_lbs numeric(14,4) not null default 0 check (weight_lbs >= 0),
+  source_authority text not null default '',
+  source_system text not null default 'MDB',
+  source_updated_at timestamptz,
+  attributes jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint items_part_number_normalized_check check (part_number = upper(btrim(part_number)) and part_number <> '')
+);
+
+create table if not exists item_aliases (
+  id bigint generated always as identity primary key,
+  item_id bigint not null references items(id) on delete cascade,
+  alias text not null,
+  alias_type text not null default 'Search',
+  source text not null default 'MDB',
+  created_at timestamptz not null default now(),
+  constraint item_aliases_alias_not_blank_check check (btrim(alias) <> ''),
+  constraint item_aliases_item_alias_unique unique (item_id, alias)
+);
+
+create table if not exists item_source_records (
+  id bigint generated always as identity primary key,
+  item_id bigint not null references items(id) on delete restrict,
+  source_system text not null,
+  source_key text not null,
+  source_authority text not null default '',
+  source_record_updated_at timestamptz,
+  source_payload jsonb not null default '{}'::jsonb,
+  imported_at timestamptz not null default now(),
+  constraint item_source_records_source_not_blank_check check (btrim(source_system) <> '' and btrim(source_key) <> ''),
+  constraint item_source_records_item_source_unique unique (item_id, source_system, source_key)
+);
+
+create or replace function public.mdb_set_updated_at()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists items_set_updated_at on public.items;
+create trigger items_set_updated_at
+before update on public.items
+for each row execute function public.mdb_set_updated_at();
+
 create table if not exists quotes (
   id text primary key,
   number text not null,
@@ -42,6 +109,7 @@ create table if not exists quotes (
 create table if not exists quote_lines (
   id bigint generated always as identity primary key,
   quote_id text not null references quotes(id) on delete cascade,
+  item_id bigint references items(id) on delete restrict,
   sort_order int not null default 0,
   part text not null default '',
   description text not null default '',
@@ -55,6 +123,7 @@ create table if not exists quote_lines (
 );
 
 create index if not exists quote_lines_quote_id_idx on quote_lines (quote_id);
+create index if not exists quote_lines_item_id_idx on quote_lines (item_id) where item_id is not null;
 create index if not exists quotes_status_idx on quotes (status);
 create index if not exists quotes_created_at_idx on quotes (created_at desc);
 
@@ -94,6 +163,7 @@ create table if not exists orders (
 create table if not exists order_lines (
   id bigint generated always as identity primary key,
   order_id text not null references orders(id) on delete cascade,
+  item_id bigint references items(id) on delete restrict,
   sort_order int not null default 0,
   part text not null default '',
   description text not null default '',
@@ -109,6 +179,7 @@ create table if not exists order_lines (
 );
 
 create index if not exists order_lines_order_id_idx on order_lines (order_id);
+create index if not exists order_lines_item_id_idx on order_lines (item_id) where item_id is not null;
 create index if not exists order_lines_category_idx on order_lines (category);
 create index if not exists orders_status_idx on orders (status);
 create index if not exists orders_created_at_idx on orders (created_at desc);
@@ -120,6 +191,7 @@ create index if not exists orders_created_at_idx on orders (created_at desc);
 -- is the one thing that genuinely needs to be shared across the team.
 create table if not exists inventory_stock (
   part text primary key,
+  item_id bigint references items(id) on delete restrict,
   on_hand numeric not null default 0,
   allocated numeric not null default 0,
   bin text not null default '',
@@ -129,12 +201,28 @@ create table if not exists inventory_stock (
   last_modified_at timestamptz not null default now()
 );
 
+create index if not exists items_class_status_idx on items (item_class, status);
+create index if not exists items_family_idx on items (family) where family <> '';
+create index if not exists items_updated_at_idx on items (updated_at desc);
+create index if not exists item_aliases_item_id_idx on item_aliases (item_id);
+create index if not exists item_aliases_alias_idx on item_aliases (lower(alias));
+create index if not exists item_source_records_item_id_idx on item_source_records (item_id);
+create index if not exists item_source_records_source_idx on item_source_records (source_system, source_key);
+create index if not exists inventory_stock_item_id_idx on inventory_stock (item_id) where item_id is not null;
+
+alter table public.items enable row level security;
+alter table public.item_aliases enable row level security;
+alter table public.item_source_records enable row level security;
 alter table public.quotes enable row level security;
 alter table public.quote_lines enable row level security;
 alter table public.orders enable row level security;
 alter table public.order_lines enable row level security;
 alter table public.inventory_stock enable row level security;
 
+revoke all on table public.items from anon, authenticated, public;
+revoke all on table public.item_aliases from anon, authenticated, public;
+revoke all on table public.item_source_records from anon, authenticated, public;
+revoke all on function public.mdb_set_updated_at() from anon, authenticated, public;
 revoke all on table public.quotes from anon, authenticated, public;
 revoke all on table public.quote_lines from anon, authenticated, public;
 revoke all on table public.orders from anon, authenticated, public;
@@ -144,14 +232,26 @@ revoke all on table public.inventory_stock from anon, authenticated, public;
 -- service_role bypasses Row Level Security but NOT ordinary table grants.
 -- Keep its grants limited to the operations used by the server-side Functions.
 grant usage on schema public to service_role;
+revoke all on public.items from service_role;
+revoke all on public.item_aliases from service_role;
+revoke all on public.item_source_records from service_role;
 revoke all on public.quotes from service_role;
 revoke all on public.quote_lines from service_role;
 revoke all on public.orders from service_role;
 revoke all on public.order_lines from service_role;
 revoke all on public.inventory_stock from service_role;
+grant select, insert, update on public.items to service_role;
+grant select, insert, update, delete on public.item_aliases to service_role;
+grant select, insert, update on public.item_source_records to service_role;
 grant select, insert, update on public.quotes to service_role;
 grant select, insert, update, delete on public.quote_lines to service_role;
 grant select, insert, update on public.orders to service_role;
 grant select, insert, update, delete on public.order_lines to service_role;
 grant select, insert, update on public.inventory_stock to service_role;
-grant usage, select on all sequences in schema public to service_role;
+grant usage, select on sequence public.master_no_seq to service_role;
+grant usage, select on sequence public.order_no_seq to service_role;
+grant usage, select on sequence public.items_id_seq to service_role;
+grant usage, select on sequence public.item_aliases_id_seq to service_role;
+grant usage, select on sequence public.item_source_records_id_seq to service_role;
+grant usage, select on sequence public.quote_lines_id_seq to service_role;
+grant usage, select on sequence public.order_lines_id_seq to service_role;

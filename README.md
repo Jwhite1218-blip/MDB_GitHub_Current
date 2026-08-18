@@ -97,12 +97,23 @@ Core behavior:
 
 Only explicitly confirmed items may enter Quote-Prep. Suggested, related, compatible, or repair-support items never auto-add. GP remains transactional authority for current pricing, inventory, orders, invoices, and other formal records.
 
+## Item Master foundation
+
+MDB uses one canonical Item record per normalized part number for shared operational facts such as description, class, UoM, status, revision, drawing, vendor, cost, price, weight, source authority, and source lineage. Tooling and serial BOM records are linked into that Item Master without being flattened into one compatibility system.
+
+- CTS and WS004 still decide tooling compatibility and quote readiness.
+- Serial BOMs still decide confirmed rig usage and Where Used paths.
+- The Item Master supplies the common part identity used by Inventory, Quotes, Orders, Tooling, and Rig/BOM.
+- Existing text part-number fields remain in place during rollout, so linking an `item_id` is additive rather than a destructive conversion.
+- `item_source_records` preserves the source-system record and payload needed for later GP reconciliation instead of silently overwriting competing source facts.
+
 ## Demo scope
 
 ### Public portfolio boundary
 
 The deployed public site is a sandbox, not an operational login surface:
 
+- A four-digit feedback PIN limits casual access to the portfolio demo and is remembered locally for 14 days; because the gate runs in the public browser, it is not treated as security for confidential data.
 - Quotes, Orders, Inventory overrides, reports, email, shipping rates, and the real known-customer duplicate-check do not connect to the shared backend.
 - Public edits persist only in that visitor's browser under portfolio-specific storage keys.
 - The public JavaScript contains no employee roster or browser-side admin credential.
@@ -114,7 +125,7 @@ An internal deployment must use real authentication before shared backend access
 The current operational demo proves the daily-work foundation:
 
 1. Compact universal entry with typo-tolerant search
-2. Direct access to Customer, Tooling, Quotes, Inventory, and Rig/BOM workspaces
+2. Direct access to Customer, Items, Tooling, Quotes, Orders, Inventory, and Rig/BOM workspaces
 3. A streamlined Customer Profile with customer facts, complete purchase history, confirmed rigs, Tooling DNA, calibration history, and interactions
 4. Direct serial-to-BOM navigation
 5. Workspace overlays that preserve the employee's place
@@ -122,7 +133,8 @@ The current operational demo proves the daily-work foundation:
 7. Full flexible tooling search: 1,253 indexed records plus current WS004 supplements for Drive Caps, Split Spoons, HEX-COR / STD Duty, and Moyno
 8. Executable family controls for Drive Cap, HSA Auger, Split Spoon, HEX-COR / STD Duty, and Moyno
 9. Editable public-sandbox fields for on-hand, allocated, bin, and unit price across Inventory, BOM detail, and Tooling detail; these edits stay on the visitor's device
-10. Calibration-to-quote handoff and persistent browser-local Quote and Order workspaces with quantity, price, discount, freight, and totals
+10. A source-derived Item List and Item Card that connect Tooling, Inventory, Quotes, Orders, and serial BOM Where Used records through the same part identity
+11. Calibration-to-quote handoff and persistent browser-local Quote and Order workspaces with quantity, price, discount, freight, and totals
 
 The browser demo uses normalized records generated from the repository source set. The B57/B37X BOM hierarchy and tooling catalog depth are real source-derived demo data; current GP verification is still pending wherever the source says so. Inventory quantities, prices, quote values, and customer details remain editable demo values and are not production truth. The site does not load or expose the raw files in repository-level `docs/` or `data/`, and it does not claim live GP pricing, inventory, ordering, or invoicing.
 

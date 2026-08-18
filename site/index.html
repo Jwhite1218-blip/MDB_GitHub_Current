@@ -9,11 +9,27 @@
     >
     <meta name="mdb-app-mode" content="public-demo">
     <title>Mobile Drill Brain</title>
-    <link rel="stylesheet" href="styles.css?v=20260818-1">
-    <script src="app.js?v=20260818-1" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260818-3">
+    <script src="app.js?v=20260818-3" defer></script>
   </head>
 
-  <body>
+  <body class="is-access-locked">
+    <div id="feedbackAccessGate" class="pin-gate" role="dialog" aria-modal="true" aria-labelledby="feedbackAccessTitle">
+      <section class="pin-gate-card">
+        <img src="assets/mobile-drill-logo-transparent.png" width="500" height="119" alt="Mobile Drill International">
+        <span class="pin-gate-kicker">Feedback Demo</span>
+        <h1 id="feedbackAccessTitle">Mobile Drill Brain</h1>
+        <p>Enter the four-digit demo PIN.</p>
+        <form id="feedbackAccessForm" class="pin-gate-form" novalidate>
+          <label class="sr-only" for="feedbackAccessPin">Four-digit demo PIN</label>
+          <input id="feedbackAccessPin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" aria-describedby="feedbackAccessMessage" placeholder="••••">
+          <button type="submit">Open Demo</button>
+        </form>
+        <p id="feedbackAccessMessage" class="pin-gate-message" role="status" aria-live="polite"></p>
+        <small>Access is remembered on this browser.</small>
+      </section>
+    </div>
+
     <a class="skip-link" href="#mainContent">Skip to workspace</a>
 
     <header class="app-banner">
@@ -40,6 +56,7 @@
       <div class="workspace-nav-group">
         <strong>Daily Work</strong>
         <button type="button" data-open="customer"><span class="workspace-nav-icon" aria-hidden="true">C</span><span>Customers</span></button>
+        <button type="button" data-open="items"><span class="workspace-nav-icon" aria-hidden="true">IT</span><span>Items</span></button>
         <button type="button" data-open="tooling"><span class="workspace-nav-icon" aria-hidden="true">T</span><span>Tooling</span></button>
         <button type="button" data-open="quotes"><span class="workspace-nav-icon" aria-hidden="true">Q</span><span>Quotes</span></button>
         <button type="button" data-open="orders"><span class="workspace-nav-icon" aria-hidden="true">O</span><span>Orders</span></button>
@@ -96,6 +113,7 @@
             <h2>Daily Work</h2>
             <nav class="quick-nav" aria-label="Daily workspaces">
               <button type="button" data-open="customer"><span class="quick-icon quick-icon--customer" aria-hidden="true"></span><span>Customer</span></button>
+              <button type="button" data-open="items"><span class="quick-icon" aria-hidden="true">IT</span><span>Items</span></button>
               <button type="button" data-open="tooling"><span class="quick-icon quick-icon--tooling" aria-hidden="true"></span><span>Tooling</span></button>
               <button type="button" data-open="quotes"><span class="quick-icon quick-icon--quotes" aria-hidden="true"></span><span>Quotes</span></button>
               <button type="button" data-open="orders"><span class="quick-icon" aria-hidden="true">O</span><span>Orders</span></button>
@@ -255,6 +273,7 @@
         <div class="advanced-search-fields">
           <label><span>Search under</span>
             <select id="advSearchType">
+              <option value="items">Items</option>
               <option value="tooling">Tooling</option>
               <option value="rig">Rig Parts</option>
             </select>

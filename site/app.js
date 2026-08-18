@@ -6,6 +6,87 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const appMode = document.querySelector('meta[name="mdb-app-mode"]')?.content || "public-demo";
 const isPublicDemo = appMode === "public-demo";
 const publicDemoIdentity = { initials: "DEMO", name: "Demo User", isAdmin: false };
+const feedbackAccessKey = "mdb-feedback-access-v1";
+const feedbackAccessDuration = 14 * 24 * 60 * 60 * 1000;
+const feedbackPinHash = "7328f9713cf2421aed7685680e2b799ea64dedf2e76f82f1017d8bc8f80a992f";
+
+function setFeedbackAccessInert(locked) {
+  [...document.body.children].forEach((element) => {
+    if (element.id !== "feedbackAccessGate" && element.tagName !== "SCRIPT") element.inert = locked;
+  });
+}
+
+function hasRememberedFeedbackAccess() {
+  try {
+    const record = JSON.parse(localStorage.getItem(feedbackAccessKey) || "null");
+    return Number(record?.expiresAt) > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+function rememberFeedbackAccess() {
+  try {
+    localStorage.setItem(feedbackAccessKey, JSON.stringify({ expiresAt: Date.now() + feedbackAccessDuration }));
+  } catch {
+    // The demo still unlocks when private browsing blocks persistent storage.
+  }
+}
+
+async function hashFeedbackPin(pin) {
+  const bytes = new TextEncoder().encode(pin);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function unlockFeedbackDemo(remember = true) {
+  if (remember) rememberFeedbackAccess();
+  document.body.classList.remove("is-access-locked");
+  setFeedbackAccessInert(false);
+  const gate = $("#feedbackAccessGate");
+  if (gate) gate.hidden = true;
+}
+
+function initializeFeedbackAccess() {
+  const gate = $("#feedbackAccessGate");
+  const form = $("#feedbackAccessForm");
+  const input = $("#feedbackAccessPin");
+  const message = $("#feedbackAccessMessage");
+  if (!gate || !form || !input || !message || !isPublicDemo || hasRememberedFeedbackAccess()) {
+    unlockFeedbackDemo(false);
+    return;
+  }
+
+  setFeedbackAccessInert(true);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const pin = input.value.replace(/\D/g, "").slice(0, 4);
+    if (pin.length !== 4) {
+      input.setAttribute("aria-invalid", "true");
+      message.textContent = "Enter all four digits.";
+      input.focus();
+      return;
+    }
+    try {
+      if (await hashFeedbackPin(pin) === feedbackPinHash) {
+        unlockFeedbackDemo();
+        return;
+      }
+    } catch {
+      message.textContent = "This browser could not verify the PIN.";
+      return;
+    }
+    input.value = "";
+    input.setAttribute("aria-invalid", "true");
+    message.textContent = "That PIN did not match. Try again.";
+    input.focus();
+  });
+  input.addEventListener("input", () => {
+    input.value = input.value.replace(/\D/g, "").slice(0, 4);
+    input.removeAttribute("aria-invalid");
+    message.textContent = "";
+  });
+}
 
 function storageKey(key) {
   return isPublicDemo ? `mdb-portfolio-sandbox:${key}` : key;
@@ -63,6 +144,9 @@ const state = {
   selectedCustomerId: null,
   searchIndex: [],
   toolItems: [],
+  items: [],
+  itemsBackendConfigured: false,
+  itemView: { query: "", itemClass: "All", selectedPart: "" },
   quotes: [],
   quotesBackendConfigured: false,
   quoteSaveTimer: null,
@@ -90,7 +174,7 @@ const state = {
   calibView: "scenarios",
   calibResults: [],
   calibLocks: {},
-  advancedSearch: { type: "tooling", field: "description", operator: "contains", value: "" },
+  advancedSearch: { type: "items", field: "description", operator: "contains", value: "" },
   advSearchTimer: null,
   quoteListOpen: { master: true, mine: true },
   activeQuoteId: "",
@@ -426,6 +510,7 @@ const calibrationTrainingScenarios = [
 
 const workspaceEntries = [
   ["Customer Profile", "Customer workspace", "customer", "customer client account company"],
+  ["Items", "Part master and operational facts", "items", "item items part number card master revision vendor drawing"],
   ["Tooling", "Full catalog and CTS search", "tooling", "tooling drive cap split spoon hsa auger hex cor moyno drill rod"],
   ["Quote Builder", "Shared team quotes, GP-style layout", "quotes", "quote pricing estimate builder"],
   ["Orders", "Open orders, shipped and backorder tracking", "orders", "order orders open backorder shipped fulfillment"],
@@ -974,6 +1059,7 @@ async function pushStockToBackend(part) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         part,
+        itemId: itemIdForPart(part),
         onHand: stock.onHand, allocated: stock.allocated, bin: stock.bin, unitPrice: stock.unitPrice,
         lastModifiedByInitials: state.identity?.initials || "", lastModifiedByName: state.identity?.name || "",
       }),
@@ -1029,8 +1115,10 @@ async function loadData() {
   state.calibResults = safeLoad("mdb-demo-calib-results", []);
   state.calibLocks = safeLoad("mdb-demo-calib-locks", {});
   state.rigQuoteFiles = await loadRigQuoteFiles();
-  state.ready = true;
   buildToolItems();
+  buildItemMaster();
+  await loadItems();
+  state.ready = true;
   buildSearchIndex();
   elements.globalSearchInput.placeholder = "Search customer, tooling, part number, rig or serial...";
 }
@@ -1080,6 +1168,159 @@ function buildToolItems() {
   state.toolItems = [...drive, ...split, ...hex, ...moyno, ...base];
 }
 
+function canonicalPartNumber(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function itemIdForPart(part) {
+  return state.items.find((item) => item.partNumber === canonicalPartNumber(part))?.id || null;
+}
+
+function splitItemValues(value) {
+  return String(value || "").split(/[;,]/).map((item) => item.trim()).filter(Boolean);
+}
+
+function itemAuthorityRank(value) {
+  const clean = normalize(value);
+  if (clean.includes("master")) return 60;
+  if (clean.includes("current cts") || clean.includes("current ws004")) return 50;
+  if (clean.includes("rig bom")) return 40;
+  if (clean.includes("tooling index")) return 30;
+  return 10;
+}
+
+function buildItemMaster() {
+  const itemMap = new Map();
+  const ensureItem = (part) => {
+    const partNumber = canonicalPartNumber(part);
+    if (!partNumber) return null;
+    if (!itemMap.has(partNumber)) {
+      itemMap.set(partNumber, {
+        id: null, partNumber, description: "", descriptionRank: -1,
+        itemClass: "Other", category: "", family: "", subfamily: "", uom: "EA", status: "Active",
+        revision: "", drawingNumber: "", preferredVendor: "", standardCost: 0, listPrice: 0, weightLbs: 0,
+        sourceAuthority: "", sourceSystem: "MDB source set", sourceUpdatedAt: null, updatedAt: null,
+        attributes: {}, areas: new Set(), families: new Set(), subfamilies: new Set(), authorities: new Set(),
+        aliases: new Set(), models: new Set(), sections: new Set(), serials: new Set(), toolIds: new Set(),
+        sourceKeys: new Set(), descriptionVariants: new Set(), quoteable: false, blockedSource: false,
+      });
+    }
+    return itemMap.get(partNumber);
+  };
+  const considerDescription = (item, description, authority) => {
+    const cleanDescription = String(description || "").trim();
+    if (!cleanDescription) return;
+    item.descriptionVariants.add(cleanDescription);
+    const rank = itemAuthorityRank(authority);
+    if (rank > item.descriptionRank || (rank === item.descriptionRank && cleanDescription.length > item.description.length)) {
+      item.description = cleanDescription;
+      item.descriptionRank = rank;
+    }
+  };
+
+  for (const source of state.toolItems) {
+    if (!source.part) continue;
+    const item = ensureItem(source.part);
+    if (!item) continue;
+    const authority = source.sourceType || source.sourceAuthority || "Tooling index";
+    item.areas.add("Tooling");
+    if (source.family) item.families.add(source.family);
+    if (source.subfamily) item.subfamilies.add(source.subfamily);
+    if (authority) item.authorities.add(authority);
+    if (source.rawPart) item.aliases.add(String(source.rawPart));
+    if (source.alternatePart) item.aliases.add(String(source.alternatePart));
+    if (source.aliases) item.aliases.add(String(source.aliases));
+    item.toolIds.add(source.id);
+    item.sourceKeys.add(`tooling:${source.id}`);
+    item.quoteable ||= Boolean(source.quoteable);
+    item.blockedSource ||= normalize(source.status).includes("blocked");
+    considerDescription(item, source.description, authority);
+  }
+
+  for (const source of state.data.rig.items) {
+    if (!source.part) continue;
+    const item = ensureItem(source.part);
+    if (!item) continue;
+    const authority = "Rig BOM source";
+    item.areas.add("Rig Part");
+    if (source.domain) item.families.add(source.domain);
+    splitItemValues(source.models).forEach((value) => item.models.add(value));
+    splitItemValues(source.sections).forEach((value) => item.sections.add(value));
+    splitItemValues(source.serials).forEach((value) => item.serials.add(value));
+    if (source.aliases) item.aliases.add(String(source.aliases));
+    item.authorities.add(authority);
+    item.sourceKeys.add(`rig:${source.id}`);
+    item.quoteable = true;
+    considerDescription(item, source.cleanDescription || source.description, authority);
+  }
+
+  state.items = [...itemMap.values()].map((item) => {
+    const areas = [...item.areas];
+    const itemClass = areas.includes("Tooling") && areas.includes("Rig Part") ? "Tooling + Rig Part" : areas[0] || "Other";
+    const families = [...item.families].sort();
+    const subfamilies = [...item.subfamilies].sort();
+    const authorities = [...item.authorities].sort((a, b) => itemAuthorityRank(b) - itemAuthorityRank(a));
+    return {
+      ...item,
+      itemClass,
+      category: families[0] || itemClass,
+      family: families.join(" / "),
+      subfamily: subfamilies.join(" / "),
+      sourceAuthority: authorities.join(" + "),
+      status: item.blockedSource && item.sourceKeys.size === 1 ? "Blocked" : "Active",
+      reviewRequired: item.descriptionVariants.size > 1,
+      sourceCount: item.sourceKeys.size,
+      areas, families, subfamilies, authorities,
+      aliases: [...item.aliases], models: [...item.models].sort(), sections: [...item.sections].sort(),
+      serials: [...item.serials].sort(), toolIds: [...item.toolIds], sourceKeys: [...item.sourceKeys],
+      descriptionVariants: [...item.descriptionVariants],
+    };
+  }).sort((a, b) => a.partNumber.localeCompare(b.partNumber, undefined, { numeric: true }));
+}
+
+function mergeBackendItems(remoteItems) {
+  const map = new Map(state.items.map((item) => [item.partNumber, item]));
+  for (const remote of remoteItems) {
+    const partNumber = canonicalPartNumber(remote.partNumber);
+    if (!partNumber) continue;
+    const local = map.get(partNumber) || {
+      partNumber, areas: [], families: [], subfamilies: [], authorities: [], aliases: [], models: [], sections: [],
+      serials: [], toolIds: [], sourceKeys: [], descriptionVariants: [], sourceCount: 0, quoteable: true,
+    };
+    map.set(partNumber, {
+      ...local,
+      ...remote,
+      partNumber,
+      description: remote.description || local.description || "Item record",
+      itemClass: remote.itemClass || local.itemClass || "Other",
+      category: remote.category || local.category || "",
+      family: remote.family || local.family || "",
+      subfamily: remote.subfamily || local.subfamily || "",
+      sourceAuthority: remote.sourceAuthority || local.sourceAuthority || "",
+      sourceSystem: remote.sourceSystem || local.sourceSystem || "MDB",
+    });
+  }
+  state.items = [...map.values()].sort((a, b) => a.partNumber.localeCompare(b.partNumber, undefined, { numeric: true }));
+}
+
+async function loadItems() {
+  if (isPublicDemo) {
+    state.itemsBackendConfigured = false;
+    return;
+  }
+  try {
+    const response = await fetch("/.netlify/functions/items-list");
+    if (!response.ok) return;
+    const data = await response.json();
+    if (data.configured && Array.isArray(data.items)) {
+      mergeBackendItems(data.items);
+      state.itemsBackendConfigured = true;
+    }
+  } catch {
+    state.itemsBackendConfigured = false;
+  }
+}
+
 function buildSearchIndex() {
   const customerEntries = customers.map((customer) => ({
     id: `customer-${customer.id}`, label: customer.name, detail: customer.contact, category: "Customer",
@@ -1106,7 +1347,12 @@ function buildSearchIndex() {
     query: item.part || item.description, toolId: item.id,
     aliases: `${item.rawPart || ""} ${item.alternatePart || ""} ${item.aliases || ""} ${item.size || ""} ${item.connection || ""}`,
   }));
-  state.searchIndex = [...workspaceEntries, ...customerEntries, ...rigSpecEntries, ...rigEntries, ...rigPartEntries, ...toolEntries];
+  const itemEntries = state.items.map((item) => ({
+    id: `item-${item.partNumber}`, label: item.partNumber, detail: item.description,
+    category: "Item", action: "items", part: item.partNumber,
+    aliases: `${item.aliases.join(" ")} ${item.family} ${item.subfamily} ${item.models.join(" ")} ${item.sections.join(" ")}`,
+  }));
+  state.searchIndex = [...workspaceEntries, ...customerEntries, ...rigSpecEntries, ...rigEntries, ...itemEntries, ...rigPartEntries, ...toolEntries];
 }
 
 function findMatches(query, entries = state.searchIndex, limit = 10) {
@@ -1142,6 +1388,7 @@ function dispatchSearchResult(result) {
   if (result.action === "customer") openCustomerWorkspace(result.customerId);
   else if (result.action === "bom") openWorkspace("bom", { serial: result.serial, part: result.part });
   else if (result.action === "rigSpecs") openWorkspace("rigSpecs", { model: result.model });
+  else if (result.action === "items") openWorkspace("items", { query: result.part, part: result.part });
   else if (result.action === "tooling") openWorkspace("tooling", { query: result.query, toolId: result.toolId });
   else openWorkspace(result.action);
 }
@@ -1249,13 +1496,14 @@ function openWorkspace(type, options = {}) {
   const customer = customers.find((item) => item.id === state.selectedCustomerId);
   elements.overlayEyebrow.textContent = type === "customerTooling" ? customer?.name || "Customer" : "MDB";
   const titles = {
-    tooling: "Tooling", customerTooling: "Customer Tooling", quotes: "Quote Builder", orders: "Orders", inventory: "Inventory", bom: "Rig / BOM View", rigSpecs: "Rig Specifications",
+    items: "Items", tooling: "Tooling", customerTooling: "Customer Tooling", quotes: "Quote Builder", orders: "Orders", inventory: "Inventory", bom: "Rig / BOM View", rigSpecs: "Rig Specifications",
     calibration: "Calibration", rigSales: "Rig Sales", prospects: "New Prospect Search", callList: "Daily Call List",
     calibrationTraining: "Calibration Training", workflowTraining: "Workflow Training",
     reports: "Sales Reports",
   };
   elements.overlayTitle.textContent = titles[type] || "Workspace";
   setActiveNav(type === "customerTooling" ? "customer" : type);
+  if (type === "items") renderItemsWorkspace(options);
   if (type === "tooling") {
     state.tooling = { query: options.query || "", scope: "All", builder: detectBuilder(options.query || ""), filters: {}, selectedId: options.toolId || "", browseOpen: false };
     renderToolingWorkspace(options);
@@ -1354,9 +1602,11 @@ function matchesOperator(fieldValue, operator, searchValue) {
 function advancedSearchResults() {
   const { type, field, operator, value } = state.advancedSearch;
   if (!value.trim()) return [];
-  const source = type === "rig"
-    ? state.data.rig.items.map((item) => ({ part: item.part, description: item.cleanDescription || item.description, family: item.domain, kind: "rig" }))
-    : state.toolItems.map((item) => ({ part: item.part, description: item.description, family: item.family, kind: "tooling", toolId: item.id }));
+  const source = type === "items"
+    ? state.items.map((item) => ({ part: item.partNumber, description: item.description, family: item.itemClass, kind: "item" }))
+    : type === "rig"
+      ? state.data.rig.items.map((item) => ({ part: item.part, description: item.cleanDescription || item.description, family: item.domain, kind: "rig" }))
+      : state.toolItems.map((item) => ({ part: item.part, description: item.description, family: item.family, kind: "tooling", toolId: item.id }));
   const fieldGetter = field === "part" ? (item) => item.part : (item) => item.description;
   return source.filter((item) => fieldGetter(item) && matchesOperator(fieldGetter(item), operator, value)).slice(0, 60);
 }
@@ -1618,14 +1868,87 @@ function renderToolDetail(item) {
     <dl class="detail-grid">${fields.map(([label, value]) => `<dt>${label}</dt><dd>${escapeHTML(value)}</dd>`).join("")}</dl>
     ${item.reviewNotes ? `<div class="detail-note"><strong>Review note</strong><span>${escapeHTML(item.reviewNotes)}</span></div>` : ""}
     ${stock ? `<div class="detail-actions"><label class="field"><span>Demo unit price</span><input type="number" min="0" step="0.01" data-stock-part="${escapeHTML(item.part)}" data-stock-field="unitPrice" value="${stock.unitPrice}"></label>
-      ${addPartButton(item.part, item.description, !item.quoteable, "Add to Quote")}</div>` : ""}`;
+      <div class="detail-button-stack"><button type="button" class="secondary-button" data-open-item-part="${escapeHTML(item.part)}">Open Item</button>${addPartButton(item.part, item.description, !item.quoteable, "Add to Quote")}</div></div>` : ""}`;
+}
+
+function itemClasses() {
+  return ["All", ...new Set(state.items.map((item) => item.itemClass).filter(Boolean))];
+}
+
+function filteredItems() {
+  const query = state.itemView.query.trim();
+  let items = state.items.filter((item) => state.itemView.itemClass === "All" || item.itemClass === state.itemView.itemClass);
+  if (query) {
+    items = items.map((item) => ({
+      ...item,
+      score: matchScore(query, `${item.partNumber} ${item.description} ${item.itemClass} ${item.category} ${item.family} ${item.subfamily} ${item.aliases.join(" ")} ${item.models.join(" ")} ${item.sections.join(" ")}`),
+    })).filter((item) => item.score >= 0.52).sort((a, b) => b.score - a.score || a.partNumber.localeCompare(b.partNumber, undefined, { numeric: true }));
+  }
+  return items;
+}
+
+function renderItemsWorkspace(options = {}) {
+  if (Object.hasOwn(options, "query")) state.itemView.query = options.query || "";
+  if (options.part) state.itemView.selectedPart = canonicalPartNumber(options.part);
+  const classes = itemClasses();
+  if (!classes.includes(state.itemView.itemClass)) state.itemView.itemClass = "All";
+  elements.overlayBody.innerHTML = `<div class="workbench item-workbench">
+    <div class="item-workbench-bar">
+      <label class="inline-search"><span class="search-mark"></span><input id="itemSearch" type="search" value="${escapeHTML(state.itemView.query)}" placeholder="Search part number, description, model, or section..."></label>
+      <label class="field item-class-filter"><span>Class</span><select id="itemClassFilter">${classes.map((value) => `<option ${value === state.itemView.itemClass ? "selected" : ""}>${escapeHTML(value)}</option>`).join("")}</select></label>
+      <span class="demo-data-label">${isPublicDemo ? "Source-derived portfolio records" : state.itemsBackendConfigured ? "Shared Item Master" : "Source-derived records; backend pending"}</span>
+    </div>
+    <div class="item-layout"><section class="item-list-panel"><div id="itemResultSummary" class="panel-strip"></div><div id="itemResults" class="item-results"></div></section><aside id="itemDetail" class="item-detail"></aside></div>
+  </div>`;
+  renderItemResults();
+}
+
+function renderItemResults() {
+  const items = filteredItems();
+  const visible = items.slice(0, 240);
+  if (!visible.some((item) => item.partNumber === state.itemView.selectedPart)) {
+    state.itemView.selectedPart = visible[0]?.partNumber || "";
+  }
+  $("#itemResultSummary").innerHTML = `<strong>${items.length.toLocaleString()} items</strong><span>${items.length > visible.length ? `Showing first ${visible.length}` : "Full result set"}</span>`;
+  $("#itemResults").innerHTML = visible.length ? visible.map((item) => {
+    const stock = getStock(item.partNumber);
+    const available = Number(stock.onHand) - Number(stock.allocated);
+    return `<button type="button" class="item-result ${item.partNumber === state.itemView.selectedPart ? "is-selected" : ""}" data-item-part="${escapeHTML(item.partNumber)}">
+      <span><strong>${escapeHTML(item.partNumber)}</strong><small>${escapeHTML(item.description)}</small></span>
+      <span><em>${escapeHTML(item.itemClass)}</em><small>${available.toLocaleString()} available</small></span>
+      <span class="status-label ${item.reviewRequired ? "status-label--warn" : statusClass(item.status)}">${escapeHTML(item.reviewRequired ? "Source review" : item.status)}</span>
+    </button>`;
+  }).join("") : '<div class="search-empty">No Item record matches this search.</div>';
+  renderItemDetail(state.itemView.selectedPart);
+}
+
+function renderItemDetail(partNumber) {
+  const item = state.items.find((record) => record.partNumber === partNumber);
+  const host = $("#itemDetail");
+  if (!host) return;
+  if (!item) {
+    host.innerHTML = '<div class="profile-empty"><strong>Select an Item</strong></div>';
+    return;
+  }
+  state.itemView.selectedPart = item.partNumber;
+  const stock = getStock(item.partNumber);
+  const available = Number(stock.onHand) - Number(stock.allocated);
+  const values = [
+    ["Class", item.itemClass], ["Category", item.category], ["Family", item.family], ["Type", item.subfamily],
+    ["UOM", item.uom], ["Revision", item.revision || "Not loaded"], ["Drawing", item.drawingNumber || "Not loaded"],
+    ["Vendor", item.preferredVendor || "Not loaded"], ["Source", item.sourceAuthority || item.sourceSystem],
+  ];
+  const whereUsed = [...new Set([...(item.models || []), ...(item.sections || [])])];
+  host.innerHTML = `<header class="detail-heading"><span class="status-label ${statusClass(item.status)}">${escapeHTML(item.status)}</span><h3>${escapeHTML(item.partNumber)}</h3><p>${escapeHTML(item.description)}</p></header>
+    <div class="item-stock-strip"><div><span>On hand</span><strong>${Number(stock.onHand).toLocaleString()}</strong></div><div><span>Allocated</span><strong>${Number(stock.allocated).toLocaleString()}</strong></div><div><span>Available</span><strong class="${available < 1 ? "is-low" : ""}">${available.toLocaleString()}</strong></div><div><span>Unit price</span><strong>${formatCurrency(stock.unitPrice)}</strong></div></div>
+    <dl class="detail-grid">${values.map(([label, value]) => `<dt>${escapeHTML(label)}</dt><dd>${escapeHTML(value || "—")}</dd>`).join("")}</dl>
+    <section class="item-card-section"><h4>Where used</h4>${whereUsed.length ? `<div class="item-chips">${whereUsed.slice(0, 18).map((value) => `<span>${escapeHTML(value)}</span>`).join("")}</div>` : "<p>No rig usage loaded for this Item yet.</p>"}</section>
+    <section class="item-card-section"><h4>Record lineage</h4><p>${item.sourceCount || 1} source record${item.sourceCount === 1 ? "" : "s"} combined into this Item.${item.reviewRequired ? ` ${item.descriptionVariants.length} description variants remain visible for review.` : ""}</p>${item.reviewRequired ? `<details><summary>View source descriptions</summary><ul>${item.descriptionVariants.slice(0, 12).map((value) => `<li>${escapeHTML(value)}</li>`).join("")}</ul></details>` : ""}</section>
+    <div class="item-card-actions">${item.toolIds?.length ? `<button type="button" class="secondary-button" data-item-open-tooling="${escapeHTML(item.partNumber)}">Tooling</button>` : ""}${item.serials?.length ? `<button type="button" class="secondary-button" data-item-open-bom="${escapeHTML(item.partNumber)}" data-item-serial="${escapeHTML(item.serials[0])}">Rig / BOM</button>` : ""}${addPartButton(item.partNumber, item.description, !item.quoteable, "Add to Quote")}</div>`;
 }
 
 function inventorySourceItems() {
-  const map = new Map();
-  for (const item of state.toolItems) if (item.part && !map.has(item.part)) map.set(item.part, { part: item.part, description: item.description, area: "Tooling" });
-  for (const item of state.data.rig.items) if (item.part && !map.has(item.part)) map.set(item.part, { part: item.part, description: item.cleanDescription || item.description, area: "Rig Parts" });
-  return [...map.values()];
+  return state.items.map((item) => ({ part: item.partNumber, description: item.description, area: item.itemClass }));
 }
 
 function renderInventoryWorkspace(query = "") {
@@ -1643,7 +1966,7 @@ function renderInventoryResults(query = "") {
     <div class="inventory-table-wrap"><table class="data-table inventory-table"><thead><tr><th>Part</th><th>Description</th><th>Area</th><th>On Hand</th><th>Allocated</th><th>Available</th><th>Bin</th><th>Unit Price</th><th>Quote</th></tr></thead><tbody>
     ${visible.map((item) => {
       const stock = getStock(item.part); const available = Number(stock.onHand) - Number(stock.allocated);
-      return `<tr><td><strong>${escapeHTML(item.part)}</strong></td><td>${escapeHTML(item.description)}</td><td>${escapeHTML(item.area)}</td>
+      return `<tr><td><button type="button" class="link-button item-part-link" data-open-item-part="${escapeHTML(item.part)}">${escapeHTML(item.part)}</button></td><td>${escapeHTML(item.description)}</td><td>${escapeHTML(item.area)}</td>
       <td><input class="cell-input" type="number" min="0" data-stock-part="${escapeHTML(item.part)}" data-stock-field="onHand" value="${stock.onHand}"></td>
       <td><input class="cell-input" type="number" min="0" data-stock-part="${escapeHTML(item.part)}" data-stock-field="allocated" value="${stock.allocated}"></td>
       <td><strong data-stock-available="${escapeHTML(item.part)}" class="${available < 1 ? "is-low" : ""}">${available}</strong></td>
@@ -1678,7 +2001,7 @@ function clampQuantity(value) {
 function addQuoteLine(part, description, price = 0, source = "MDB demo", category = "") {
   const quote = activeQuote();
   if (!quote) { showToast("Open a quote first"); return; }
-  quote.lines.push({ part: part || "", description: description || "", category, uom: "EA", quantity: 1, unitPrice: Number(price) || 0, discount: 0, taxable: false, source });
+  quote.lines.push({ itemId: itemIdForPart(part), part: part || "", description: description || "", category, uom: "EA", quantity: 1, unitPrice: Number(price) || 0, discount: 0, taxable: false, source });
   touchQuote(quote);
   showToast(`${part || "Line"} added to quote`);
   if (!elements.quoteModal.hidden) renderQuoteModal();
@@ -1933,7 +2256,7 @@ function renderOrderSearchResults() {
 function addOrderLine(part, description, price = 0, source = "MDB demo", category = "") {
   const order = activeOrder();
   if (!order) { showToast("Open an order first"); return; }
-  const line = { part: part || "", description: description || "", category, uom: "EA", quantity: 1, shippedQty: 0, backorderQty: 0, unitPrice: Number(price) || 0, discount: 0, taxable: false, source };
+  const line = { itemId: itemIdForPart(part), part: part || "", description: description || "", category, uom: "EA", quantity: 1, shippedQty: 0, backorderQty: 0, unitPrice: Number(price) || 0, discount: 0, taxable: false, source };
   order.lines.push(line);
   applyLineQuantity(line, 1, (accepted) => {
     if (!accepted) { order.lines.pop(); return; }
@@ -2200,7 +2523,7 @@ function renderBomDetail(part) {
     <dl class="detail-grid"><dt>Serial</dt><dd>${escapeHTML(serial)}</dd><dt>Section</dt><dd>${escapeHTML(relation?.section || assembly?.section || item?.sections || "")}</dd><dt>Quantity</dt><dd>${escapeHTML(relation?.quantity || "Assembly")}</dd><dt>UoM</dt><dd>${escapeHTML(relation?.uom || "")}</dd><dt>BOM path</dt><dd>${escapeHTML(relation?.path || "Top-level assembly")}</dd><dt>Source page</dt><dd>${escapeHTML(relation?.page || assembly?.page || "")}</dd></dl>
     <section class="where-used"><h4>Where Used (${whereUsed.length})</h4>${whereUsed.slice(0, 20).map((row) => `<div><strong>${escapeHTML(row.assemblyPart)}</strong><span>${escapeHTML(row.assemblyDescription)}</span><small>${escapeHTML(row.section)} · Qty ${escapeHTML(row.quantity)}</small></div>`).join("") || '<p>No child relationship rows recorded.</p>'}</section>
     <div class="detail-actions detail-actions--stack"><div class="stock-mini"><label class="field"><span>Demo on hand</span><input type="number" min="0" data-stock-part="${escapeHTML(part)}" data-stock-field="onHand" value="${stock.onHand}"></label><label class="field"><span>Demo allocated</span><input type="number" min="0" data-stock-part="${escapeHTML(part)}" data-stock-field="allocated" value="${stock.allocated}"></label></div>
-    <label class="field"><span>Demo unit price</span><input type="number" min="0" step="0.01" data-stock-part="${escapeHTML(part)}" data-stock-field="unitPrice" value="${stock.unitPrice}"></label>${addPartButton(part, description, false, "Add to Quote")}</div>`;
+    <label class="field"><span>Demo unit price</span><input type="number" min="0" step="0.01" data-stock-part="${escapeHTML(part)}" data-stock-field="unitPrice" value="${stock.unitPrice}"></label><button type="button" class="secondary-button" data-open-item-part="${escapeHTML(part)}">Open Item</button>${addPartButton(part, description, false, "Add to Quote")}</div>`;
 }
 
 function addDays(dateValue, days) {
@@ -2677,6 +3000,11 @@ function handleOverlayInput(event) {
     clearTimeout(state.searchTimer);
     state.searchTimer = setTimeout(() => renderInventoryResults(target.value), 90);
   }
+  if (target.id === "itemSearch") {
+    state.itemView.query = target.value;
+    clearTimeout(state.searchTimer);
+    state.searchTimer = setTimeout(renderItemResults, 90);
+  }
   if (target.id === "bomSearch") {
     state.bom.query = target.value;
     clearTimeout(state.searchTimer);
@@ -2710,6 +3038,7 @@ elements.overlayBody.addEventListener("input", handleOverlayInput);
 elements.overlayBody.addEventListener("change", async (event) => {
   handleOverlayInput(event);
   const target = event.target;
+  if (target.id === "itemClassFilter") { state.itemView.itemClass = target.value; state.itemView.selectedPart = ""; renderItemResults(); }
   if (target.id === "bomRigSelect") { state.bom.serial = target.value; state.bom.section = ""; state.bom.selectedPart = ""; renderBomWorkspace(); }
   if (target.id === "calibrationCustomerSelect") { state.calibrationCustomerId = target.value; renderCalibrationWorkspace(); }
   if (target.matches("[data-calib-admin-decision]")) {
@@ -2763,6 +3092,12 @@ elements.overlayBody.addEventListener("keydown", (event) => {
 });
 
 elements.overlayBody.addEventListener("click", (event) => {
+  const itemResult = event.target.closest("[data-item-part]");
+  if (itemResult) { state.itemView.selectedPart = itemResult.dataset.itemPart; $$(".item-result").forEach((button) => button.classList.toggle("is-selected", button === itemResult)); renderItemDetail(state.itemView.selectedPart); return; }
+  const itemTooling = event.target.closest("[data-item-open-tooling]");
+  if (itemTooling) { openWorkspace("tooling", { query: itemTooling.dataset.itemOpenTooling }); return; }
+  const itemBom = event.target.closest("[data-item-open-bom]");
+  if (itemBom) { openWorkspace("bom", { serial: itemBom.dataset.itemSerial, part: itemBom.dataset.itemOpenBom }); return; }
   if (event.target.closest("[data-schedule-calibration-workspace]")) { const customer = customers.find((item) => item.id === state.calibrationCustomerId); startCalibrationQuote(customer); return; }
   if (event.target.closest("[data-demo-certificate]")) { showToast("Calibration certificate opened in demo mode"); return; }
   if (event.target.closest("[data-rig-new]")) { state.rigSalesEditor = { id: "", company: "", territory: "Unassigned", rig: "TBD", stage: "New", value: 0, next: "" }; renderRigSalesWorkspace(); $("#rigSalesOpportunityForm input[name='company']")?.focus(); return; }
@@ -2914,6 +3249,7 @@ elements.quoteModalBody.addEventListener("input", (event) => {
     const line = quote.lines[Number(row.dataset.lineIndex)];
     const field = target.dataset.lineField;
     line[field] = target.type === "checkbox" ? target.checked : field === "quantity" ? clampQuantity(target.value) : target.type === "number" ? Number(target.value) : target.value;
+    if (field === "part") line.itemId = itemIdForPart(line.part);
     if (field === "quantity" && String(target.value) !== String(line[field])) target.value = line[field];
     touchQuote(quote);
     updateQuoteNumbers();
@@ -2974,6 +3310,7 @@ elements.orderModalBody.addEventListener("input", (event) => {
     const line = order.lines[Number(row.dataset.lineIndex)];
     const field = target.dataset.lineField;
     line[field] = target.type === "checkbox" ? target.checked : target.type === "number" ? Number(target.value) : target.value;
+    if (field === "part") line.itemId = itemIdForPart(line.part);
     touchOrder(order);
     updateOrderNumbers();
   }
@@ -3031,7 +3368,8 @@ $("#advSearchResults").addEventListener("click", (event) => {
   const button = event.target.closest("[data-adv-result-kind]");
   if (!button) return;
   closeAdvancedSearch();
-  if (button.dataset.advResultKind === "rig") openWorkspace("bom", { part: button.dataset.advResultPart });
+  if (button.dataset.advResultKind === "item") openWorkspace("items", { query: button.dataset.advResultPart, part: button.dataset.advResultPart });
+  else if (button.dataset.advResultKind === "rig") openWorkspace("bom", { part: button.dataset.advResultPart });
   else openWorkspace("tooling", { toolId: button.dataset.advResultToolId });
 });
 
@@ -3044,6 +3382,8 @@ function navigateWorkspace(type) {
 $$('[data-open]').forEach((button) => button.addEventListener("click", () => navigateWorkspace(button.dataset.open)));
 
 document.addEventListener("click", (event) => {
+  const itemButton = event.target.closest("[data-open-item-part]");
+  if (itemButton) { openWorkspace("items", { query: itemButton.dataset.openItemPart, part: itemButton.dataset.openItemPart }); return; }
   const workspaceButton = event.target.closest("[data-workspace]");
   if (workspaceButton) openWorkspace(workspaceButton.dataset.workspace);
   const bomButton = event.target.closest("[data-open-bom]");
@@ -3132,4 +3472,5 @@ async function boot() {
   }
 }
 
+initializeFeedbackAccess();
 boot();

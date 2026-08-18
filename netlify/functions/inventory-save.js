@@ -30,6 +30,7 @@ exports.handler = async (event) => {
 
   const row = {
     part: payload.part,
+    item_id: Number.isInteger(Number(payload.itemId)) && Number(payload.itemId) > 0 ? Number(payload.itemId) : null,
     on_hand: Number(payload.onHand) || 0,
     allocated: Number(payload.allocated) || 0,
     bin: payload.bin || "",
