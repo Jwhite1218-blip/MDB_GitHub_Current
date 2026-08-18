@@ -1,5 +1,6 @@
-// Sends a Calibration Training result to jon.white@mobiledrill.net via Resend.
-// Requires the RESEND_API_KEY environment variable to be set on the Netlify site.
+// Sends a Calibration Training result through Resend.
+// Requires RESEND_API_KEY and CALIBRATION_RESULTS_EMAIL to be set on the
+// protected internal deployment.
 // Without it, this returns { sent: false } and the frontend falls back to the
 // on-screen Admin Console — the result is never lost, only the email is skipped.
 //
@@ -7,16 +8,19 @@
 // which works without verifying a domain. Swap it for a verified Mobile Drill
 // address once a sending domain is set up in Resend.
 
-const RECIPIENT = "jon.white@mobiledrill.net";
+const { internalAccess } = require("./_internal-access");
 
 exports.handler = async (event) => {
+  const access = internalAccess(event);
+  if (!access.ok) return access.response;
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: "Method not allowed" };
   }
 
   const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
-    return { statusCode: 200, body: JSON.stringify({ sent: false, reason: "RESEND_API_KEY not configured" }) };
+  const recipient = process.env.CALIBRATION_RESULTS_EMAIL;
+  if (!apiKey || !recipient) {
+    return { statusCode: 200, body: JSON.stringify({ sent: false, reason: "Email delivery is not configured" }) };
   }
 
   let payload;
@@ -53,7 +57,7 @@ exports.handler = async (event) => {
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         from: "MDB Calibration Training <onboarding@resend.dev>",
-        to: [RECIPIENT],
+        to: [recipient],
         subject: `Calibration Training result — ${repName} — ${scenarioTitle} — ${outcome}`,
         html,
       }),

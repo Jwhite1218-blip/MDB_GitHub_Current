@@ -1,10 +1,9 @@
 -- MDB Quotes schema (Supabase / Postgres)
 --
--- This is accessed ONLY through Netlify Functions using the Supabase
--- service_role key (server-side, never exposed to the browser). There
--- is no per-user auth model here, so Row Level Security is left off
--- deliberately -- the Netlify Function is the only door in, and it
--- validates/shapes everything before it touches this table.
+-- This is accessed ONLY through authenticated Netlify Functions using the
+-- Supabase service_role key (server-side, never exposed to the browser).
+-- Row Level Security stays enabled as defense in depth and anon/authenticated
+-- Data API grants are explicitly revoked.
 --
 -- Run this once in the Supabase SQL editor (or via `supabase db push`
 -- once a CLI project is linked) to set up the tables.
@@ -130,12 +129,29 @@ create table if not exists inventory_stock (
   last_modified_at timestamptz not null default now()
 );
 
--- service_role bypasses Row Level Security but NOT ordinary table grants --
--- these are required even for the service key to read/write these tables.
+alter table public.quotes enable row level security;
+alter table public.quote_lines enable row level security;
+alter table public.orders enable row level security;
+alter table public.order_lines enable row level security;
+alter table public.inventory_stock enable row level security;
+
+revoke all on table public.quotes from anon, authenticated, public;
+revoke all on table public.quote_lines from anon, authenticated, public;
+revoke all on table public.orders from anon, authenticated, public;
+revoke all on table public.order_lines from anon, authenticated, public;
+revoke all on table public.inventory_stock from anon, authenticated, public;
+
+-- service_role bypasses Row Level Security but NOT ordinary table grants.
+-- Keep its grants limited to the operations used by the server-side Functions.
 grant usage on schema public to service_role;
-grant all on public.quotes to service_role;
-grant all on public.quote_lines to service_role;
-grant all on public.orders to service_role;
-grant all on public.order_lines to service_role;
-grant all on public.inventory_stock to service_role;
+revoke all on public.quotes from service_role;
+revoke all on public.quote_lines from service_role;
+revoke all on public.orders from service_role;
+revoke all on public.order_lines from service_role;
+revoke all on public.inventory_stock from service_role;
+grant select, insert, update on public.quotes to service_role;
+grant select, insert, update, delete on public.quote_lines to service_role;
+grant select, insert, update on public.orders to service_role;
+grant select, insert, update, delete on public.order_lines to service_role;
+grant select, insert, update on public.inventory_stock to service_role;
 grant usage, select on all sequences in schema public to service_role;

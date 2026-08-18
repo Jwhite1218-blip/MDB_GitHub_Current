@@ -5,8 +5,11 @@
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const { internalAccess } = require("./_internal-access");
 
 exports.handler = async (event) => {
+  const access = internalAccess(event);
+  if (!access.ok) return access.response;
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: "Method not allowed" };
   }

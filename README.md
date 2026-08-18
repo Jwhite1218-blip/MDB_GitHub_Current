@@ -99,6 +99,18 @@ Only explicitly confirmed items may enter Quote-Prep. Suggested, related, compat
 
 ## Demo scope
 
+### Public portfolio boundary
+
+The deployed public site is a sandbox, not an operational login surface:
+
+- Quotes, Orders, Inventory overrides, reports, email, shipping rates, and the real known-customer duplicate-check do not connect to the shared backend.
+- Public edits persist only in that visitor's browser under portfolio-specific storage keys.
+- The public JavaScript contains no employee roster or browser-side admin credential.
+- Operational Netlify Functions deny requests unless internal authentication is configured.
+- The included Supabase migration enables RLS and explicitly revokes `anon` and `authenticated` Data API access on operational tables when it is applied to the project.
+
+An internal deployment must use real authentication before shared backend access is re-enabled. Never place an internal API token or service-role credential in `site/` or any other browser-delivered file.
+
 The current operational demo proves the daily-work foundation:
 
 1. Compact universal entry with typo-tolerant search
@@ -109,8 +121,8 @@ The current operational demo proves the daily-work foundation:
 6. Full B57 `2025023` and B37X `2025028` serial BOM navigation: 25 sections, 162 assemblies, 1,400 relationships, 980 searchable rig items, and Where Used detail
 7. Full flexible tooling search: 1,253 indexed records plus current WS004 supplements for Drive Caps, Split Spoons, HEX-COR / STD Duty, and Moyno
 8. Executable family controls for Drive Cap, HSA Auger, Split Spoon, HEX-COR / STD Duty, and Moyno
-9. Editable local demo fields for on-hand, allocated, bin, and unit price across Inventory, BOM detail, and Tooling detail
-10. Calibration-to-quote handoff and a persistent local dummy Quote Builder with quantity, price, discount, freight, tax, and totals
+9. Editable public-sandbox fields for on-hand, allocated, bin, and unit price across Inventory, BOM detail, and Tooling detail; these edits stay on the visitor's device
+10. Calibration-to-quote handoff and persistent browser-local Quote and Order workspaces with quantity, price, discount, freight, and totals
 
 The browser demo uses normalized records generated from the repository source set. The B57/B37X BOM hierarchy and tooling catalog depth are real source-derived demo data; current GP verification is still pending wherever the source says so. Inventory quantities, prices, quote values, and customer details remain editable demo values and are not production truth. The site does not load or expose the raw files in repository-level `docs/` or `data/`, and it does not claim live GP pricing, inventory, ordering, or invoicing.
 

@@ -25,6 +25,7 @@ const FEDEX_CLIENT_ID = process.env.FEDEX_CLIENT_ID;
 const FEDEX_CLIENT_SECRET = process.env.FEDEX_CLIENT_SECRET;
 const FEDEX_ACCOUNT_NUMBER = process.env.FEDEX_ACCOUNT_NUMBER;
 const SHIP_FROM_ZIP = process.env.SHIP_FROM_ZIP || "46227"; // Mobile Drill Intl, Indianapolis
+const { internalAccess } = require("./_internal-access");
 
 const UPS_SERVICE_CODES = {
   "Best Way": "03", // UPS Ground
@@ -124,6 +125,8 @@ async function rateFedex({ shipVia, destZip, destState, destCountry, weightLbs, 
 }
 
 exports.handler = async (event) => {
+  const access = internalAccess(event);
+  if (!access.ok) return access.response;
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: "Method not allowed" };
   }

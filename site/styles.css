@@ -998,6 +998,7 @@ button {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 290px;
   gap: 14px;
+  min-width: 0;
   max-width: 1300px;
   margin: 0 auto;
 }
@@ -1041,6 +1042,7 @@ button {
 
 .quote-form,
 .quote-summary {
+  min-width: 0;
   background: var(--white);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -3337,8 +3339,15 @@ button:disabled {
 }
 
 .popup-body {
+  min-width: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 14px 16px;
+}
+
+.quote-lines {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .quotes-workbench {
@@ -3971,5 +3980,35 @@ button:disabled {
   .workbench-bar--tooling .record-count { display: none; }
   .customer-tooling-context header { display: block; }
   .customer-tooling-context header span { margin-top: 3px; }
+
+  .popup-panel--wide {
+    width: calc(100vw - 16px);
+  }
+
+  .popup-panel--wide .popup-body {
+    padding: 10px 12px;
+  }
+
+  .popup-panel--wide .quote-layout,
+  .popup-panel--wide .quote-form,
+  .popup-panel--wide .quote-summary {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .popup-panel--wide .quote-fields,
+  .popup-panel--wide .quote-fields--shipto,
+  .popup-panel--wide .quote-fields--dims {
+    grid-template-columns: 1fr;
+  }
+
+  .popup-panel--wide .quote-lines {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+  }
 }
 

@@ -3,6 +3,14 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
+const appMode = document.querySelector('meta[name="mdb-app-mode"]')?.content || "public-demo";
+const isPublicDemo = appMode === "public-demo";
+const publicDemoIdentity = { initials: "DEMO", name: "Demo User", isAdmin: false };
+
+function storageKey(key) {
+  return isPublicDemo ? `mdb-portfolio-sandbox:${key}` : key;
+}
+
 const elements = {
   workspaceNav: $("#workspaceNav"),
   homeView: $("#homeView"),
@@ -245,27 +253,13 @@ const workflowTrainingScenarios = {
   },
 };
 
-// Rep identity, admin PIN gate, and one-attempt locking are built and working
-// (see calibrationReps / gradeCalibrationScenario below), but flagged off for
-// now while the demo is still open for anyone to poke at freely. Flip this to
-// true when it's time to actually run it as tracked rep training.
+// The public portfolio build intentionally carries no employee roster or
+// browser-side admin credential. Authenticated staff identities belong in the
+// future internal deployment, not in a publicly downloadable JavaScript file.
 const calibIdentityGateEnabled = false;
 
-const calibrationAdminPin = "2523";
-
-const calibrationReps = [
-  { initials: "JWW", name: "Jon White", isAdmin: true },
-  { initials: "MD", name: "Mike DePoy", isAdmin: false },
-  { initials: "SM", name: "Steve Morris", isAdmin: false },
-  { initials: "CO", name: "Charlie Orzeske", isAdmin: false },
-  { initials: "LO", name: "Larry Orzeske", isAdmin: true },
-  { initials: "BM", name: "Bret Myers", isAdmin: false },
-  { initials: "BS", name: "Brock Sabo", isAdmin: true },
-  { initials: "JL", name: "Jeff Lyons", isAdmin: true },
-  { initials: "BP", name: "Brandon Parks", isAdmin: false },
-  { initials: "CD", name: "Chris Duffy", isAdmin: false },
-  { initials: "TS", name: "Tim Sabo", isAdmin: true },
-];
+const calibrationAdminPin = "";
+const calibrationReps = [publicDemoIdentity];
 
 const calibrationTrainingScenarios = [
   {
@@ -560,11 +554,11 @@ function showToast(message) {
 }
 
 function safeLoad(key, fallback) {
-  try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
+  try { return JSON.parse(localStorage.getItem(storageKey(key))) ?? fallback; } catch { return fallback; }
 }
 
 function safeSave(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* demo still works without persistence */ }
+  try { localStorage.setItem(storageKey(key), JSON.stringify(value)); } catch { /* demo still works without persistence */ }
 }
 
 function loadRigSalesOpportunities() {
@@ -708,6 +702,11 @@ function newOrder(overrides = {}) {
 }
 
 async function loadQuotes() {
+  if (isPublicDemo) {
+    state.quotesBackendConfigured = false;
+    loadQuotesFromLocal();
+    return;
+  }
   try {
     const response = await fetch("/.netlify/functions/quotes-list");
     if (response.ok) {
@@ -754,6 +753,7 @@ function saveQuotes() {
 }
 
 async function pushQuoteToBackend(quote) {
+  if (isPublicDemo) return;
   try {
     const response = await fetch("/.netlify/functions/quotes-save", {
       method: "POST",
@@ -774,11 +774,21 @@ async function pushQuoteToBackend(quote) {
 }
 
 function requireIdentity(callback) {
+  if (isPublicDemo) {
+    state.identity = { ...publicDemoIdentity };
+    callback();
+    return;
+  }
   if (state.identity) { callback(); return; }
   openIdentityPicker(callback);
 }
 
 async function loadOrders() {
+  if (isPublicDemo) {
+    state.ordersBackendConfigured = false;
+    state.orders = safeLoad("mdb-demo-orders", []);
+    return;
+  }
   try {
     const response = await fetch("/.netlify/functions/orders-list");
     if (response.ok) {
@@ -807,6 +817,7 @@ function saveOrders() {
 }
 
 async function pushOrderToBackend(order) {
+  if (isPublicDemo) return;
   try {
     const response = await fetch("/.netlify/functions/orders-save", {
       method: "POST",
@@ -921,6 +932,10 @@ function saveStock() {
 }
 
 async function loadInventory() {
+  if (isPublicDemo) {
+    state.inventoryBackendConfigured = false;
+    return;
+  }
   try {
     const response = await fetch("/.netlify/functions/inventory-list");
     if (response.ok) {
@@ -948,6 +963,10 @@ function touchStock(part) {
 }
 
 async function pushStockToBackend(part) {
+  if (isPublicDemo) {
+    state.pendingStockParts.delete(part);
+    return;
+  }
   const stock = state.stock[part];
   try {
     const response = await fetch("/.netlify/functions/inventory-save", {
@@ -1004,7 +1023,9 @@ async function loadData() {
   await loadQuotes();
   await loadOrders();
   loadRigSalesOpportunities();
-  state.identity = safeLoad("mdb-demo-identity", null) || safeLoad("mdb-demo-calib-identity", null);
+  state.identity = isPublicDemo
+    ? { ...publicDemoIdentity }
+    : safeLoad("mdb-demo-identity", null) || safeLoad("mdb-demo-calib-identity", null);
   state.calibResults = safeLoad("mdb-demo-calib-results", []);
   state.calibLocks = safeLoad("mdb-demo-calib-locks", {});
   state.rigQuoteFiles = await loadRigQuoteFiles();
@@ -1268,11 +1289,25 @@ function closeWorkspace() {
 let identityPickerCallback = null;
 
 function updateIdentityButton() {
+  if (isPublicDemo) {
+    elements.identityButton.hidden = true;
+    elements.identityButton.textContent = "Portfolio Demo";
+    elements.identityButton.title = "Public sandbox — no employee account or shared operational data";
+    elements.identityButton.setAttribute("aria-label", "Portfolio demo mode");
+    $$('[data-admin-only]').forEach((element) => { element.hidden = true; });
+    return;
+  }
+  elements.identityButton.hidden = false;
   elements.identityButton.textContent = state.identity ? `${state.identity.name} (${state.identity.initials})` : "Set your name";
   $$('[data-admin-only]').forEach((element) => { element.hidden = !state.identity?.isAdmin; });
 }
 
 function openIdentityPicker(onSelected) {
+  if (isPublicDemo) {
+    if (typeof onSelected === "function") onSelected();
+    else showToast("Public sandbox: no employee identity or shared account is in use");
+    return;
+  }
   identityPickerCallback = typeof onSelected === "function" ? onSelected : null;
   elements.identityModalTitle.textContent = state.identity ? "Switch user" : "Who are you?";
   elements.identityModalBody.innerHTML = `<div class="calib-roster-grid">${calibrationReps.map((rep) => `<button type="button" data-identity-select-rep="${escapeHTML(rep.initials)}"><strong>${escapeHTML(rep.name)}</strong><span>${escapeHTML(rep.initials)}${rep.isAdmin ? " · Admin" : ""}</span></button>`).join("")}</div>`;
@@ -1595,7 +1630,7 @@ function inventorySourceItems() {
 
 function renderInventoryWorkspace(query = "") {
   elements.overlayBody.innerHTML = `<div class="workbench inventory-workbench">
-    <div class="workbench-bar"><label class="inline-search"><span class="search-mark"></span><input id="inventorySearch" type="search" value="${escapeHTML(query)}" placeholder="Search part number or description..."></label><span class="demo-data-label">${state.inventoryBackendConfigured ? "Edits sync live across the team" : "Browser-local only right now"}</span></div>
+    <div class="workbench-bar"><label class="inline-search"><span class="search-mark"></span><input id="inventorySearch" type="search" value="${escapeHTML(query)}" placeholder="Search part number or description..."></label><span class="demo-data-label">${isPublicDemo ? "Portfolio sandbox — edits stay on this device" : state.inventoryBackendConfigured ? "Edits sync live across the team" : "Browser-local only right now"}</span></div>
     <div id="inventoryResults"></div></div>`;
   renderInventoryResults(query);
 }
@@ -1604,7 +1639,7 @@ function renderInventoryResults(query = "") {
   let items = inventorySourceItems();
   if (query) items = items.map((item) => ({ ...item, score: matchScore(query, `${item.part} ${item.description} ${item.area}`) })).filter((item) => item.score >= 0.52).sort((a, b) => b.score - a.score);
   const visible = items.slice(0, 160);
-  $("#inventoryResults").innerHTML = `<div class="panel-strip"><strong>${items.length.toLocaleString()} matches</strong><span>On-hand, allocated, bin, and price are local demo values</span></div>
+  $("#inventoryResults").innerHTML = `<div class="panel-strip"><strong>${items.length.toLocaleString()} matches</strong><span>${isPublicDemo ? "Demo starting values — edits are temporary and never change operational inventory" : "On-hand, allocated, bin, and price are local demo values"}</span></div>
     <div class="inventory-table-wrap"><table class="data-table inventory-table"><thead><tr><th>Part</th><th>Description</th><th>Area</th><th>On Hand</th><th>Allocated</th><th>Available</th><th>Bin</th><th>Unit Price</th><th>Quote</th></tr></thead><tbody>
     ${visible.map((item) => {
       const stock = getStock(item.part); const available = Number(stock.onHand) - Number(stock.allocated);
@@ -1684,7 +1719,7 @@ function renderQuoteWorkspace() {
   const openQuotes = sortedOpenQuotes();
   const mine = state.identity ? openQuotes.filter((quote) => quote.originatorInitials === state.identity.initials) : [];
   elements.overlayBody.innerHTML = `<div class="workbench quotes-workbench">
-    <div class="operations-toolbar"><div><strong>Quotes</strong><span>${state.quotesBackendConfigured ? "Synced live across the team — not sent to GP." : "Browser-local only right now — not yet synced across devices, not sent to GP."}</span></div><button type="button" class="primary-button" data-quote-new>Start New Quote</button></div>
+    <div class="operations-toolbar"><div><strong>Quotes</strong><span>${isPublicDemo ? "Portfolio sandbox — changes stay on this device and are never sent to GP." : state.quotesBackendConfigured ? "Synced live across the team — not sent to GP." : "Browser-local only right now — not yet synced across devices, not sent to GP."}</span></div><button type="button" class="primary-button" data-quote-new>Start New Quote</button></div>
     ${renderQuoteListSection("All Open Quotes", openQuotes, "master")}
     ${renderQuoteListSection("My Quotes", mine, "mine")}
   </div>`;
@@ -1798,7 +1833,7 @@ function renderOrdersWorkspace() {
   const openOrders = sortedOpenOrders();
   const mine = state.identity ? openOrders.filter((order) => order.originatorInitials === state.identity.initials) : [];
   elements.overlayBody.innerHTML = `<div class="workbench quotes-workbench">
-    <div class="operations-toolbar"><div><strong>Orders</strong><span>${state.ordersBackendConfigured ? "Synced live across the team — not sent to GP." : "Browser-local only right now — not yet synced across devices, not sent to GP."}</span></div><button type="button" class="primary-button" data-order-new>Start New Order</button></div>
+    <div class="operations-toolbar"><div><strong>Orders</strong><span>${isPublicDemo ? "Portfolio sandbox — changes stay on this device and are never sent to GP." : state.ordersBackendConfigured ? "Synced live across the team — not sent to GP." : "Browser-local only right now — not yet synced across devices, not sent to GP."}</span></div><button type="button" class="primary-button" data-order-new>Start New Order</button></div>
     ${renderOrderListSection("All Open Orders", openOrders, "master")}
     ${renderOrderListSection("My Orders", mine, "mine")}
   </div>`;
@@ -1821,6 +1856,11 @@ function reportsStatCard(label, current, previous, currentLabel, previousLabel) 
 
 async function loadReports() {
   state.reportsLoading = true;
+  if (isPublicDemo) {
+    state.reports = { configured: false, publicDemo: true };
+    state.reportsLoading = false;
+    return;
+  }
   try {
     const response = await fetch("/.netlify/functions/reports-summary");
     state.reports = response.ok ? await response.json() : { configured: false };
@@ -1838,7 +1878,7 @@ function renderReportsWorkspace() {
     return;
   }
   if (!data || !data.configured) {
-    elements.overlayBody.innerHTML = `<div class="workbench"><p class="report-empty">Reports need the live database connected — once Orders are syncing through Supabase, revenue numbers show up here automatically. Nothing to summarize yet.</p></div>`;
+    elements.overlayBody.innerHTML = `<div class="workbench"><p class="report-empty">${isPublicDemo ? "Sales Reports are intentionally disconnected from operational data in the public portfolio demo." : "Reports need the live database connected — once Orders are syncing through Supabase, revenue numbers show up here automatically. Nothing to summarize yet."}</p></div>`;
     return;
   }
   elements.overlayBody.innerHTML = `<div class="workbench reports-workbench">
@@ -1983,7 +2023,7 @@ function renderOrderModal() {
         <label class="summary-input"><span>Trade Discount</span><input type="number" min="0" step="0.01" data-order-meta-field="tradeDiscount" value="${order.tradeDiscount}"></label>
         <div class="summary-row"><span>Tax</span><span class="quote-tax-note">Calculated by GP</span></div>
         <div class="summary-row total"><span>Total</span><strong id="orderTotal">${formatCurrency(totals.total)}</strong></div>
-        <p class="quote-state">Every edit here saves and is visible to the whole team.</p>
+        <p class="quote-state">${isPublicDemo ? "Portfolio sandbox: edits stay only in this browser." : "Every edit here saves and is visible to the whole team."}</p>
       </aside>
     </div>`;
   renderOrderSearchResults();
@@ -2047,7 +2087,7 @@ function renderQuoteModal() {
         <label class="summary-input"><span>Trade Discount</span><input type="number" min="0" step="0.01" data-quote-meta-field="tradeDiscount" value="${quote.tradeDiscount}"></label>
         <div class="summary-row"><span>Tax</span><span class="quote-tax-note">Calculated by GP</span></div>
         <div class="summary-row total"><span>Total</span><strong id="quoteTotal">${formatCurrency(totals.total)}</strong></div>
-        <p class="quote-state">Every edit here saves and is visible to the whole team.</p>
+        <p class="quote-state">${isPublicDemo ? "Portfolio sandbox: edits stay only in this browser." : "Every edit here saves and is visible to the whole team."}</p>
       </aside>
     </div>`;
   renderQuoteSearchResults();
@@ -2225,6 +2265,16 @@ function renderRigQuoteFileCell(opportunity) {
 }
 
 async function loadKnownCustomers() {
+  if (isPublicDemo) {
+    state.knownCustomers = customers.map((customer, index) => ({
+      number: `DEMO-${String(index + 1).padStart(4, "0")}`,
+      name: customer.name,
+      source: "Portfolio demo customer list",
+    }));
+    state.knownCustomersConfigured = true;
+    state.knownCustomersLoaded = true;
+    return;
+  }
   try {
     const response = await fetch("/.netlify/functions/known-customers-list");
     if (response.ok) {
@@ -2270,17 +2320,23 @@ function prospectDuplicateCheck(candidate) {
   if (best && best.score >= 0.55) {
     return { label: "Possible Duplicate", statusClass: "status-label--warn", detail: `Similar name to a known customer — ${maskCustomerName(best.known.name)} (${maskCustomerNumber(best.known.number)}) — review before treating as new.`, matched: best.known };
   }
-  return { label: "New Prospect", statusClass: "", detail: "No match in known customer records (partial data — Auger sales only, Q1 2024)." };
+  return {
+    label: "New Prospect",
+    statusClass: "",
+    detail: isPublicDemo
+      ? "No match in the portfolio demo customer list."
+      : "No match in known customer records (partial data — Auger sales only, Q1 2024).",
+  };
 }
 
 function renderProspectResults() {
   const host = $("#prospectResults");
   if (!host) return;
   if (!state.prospectResults.length) {
-    host.innerHTML = '<div class="prospect-empty"><strong>Set the search parameters and run the prospect search.</strong><span>Company discovery is still demo data. The customer duplicate-check runs against a real, partial GP export.</span></div>';
+    host.innerHTML = `<div class="prospect-empty"><strong>Set the search parameters and run the prospect search.</strong><span>${isPublicDemo ? "Company discovery and duplicate-checking use safe portfolio demo data." : "Company discovery is still demo data. The customer duplicate-check runs against a real, partial GP export."}</span></div>`;
     return;
   }
-  host.innerHTML = `<div class="prospect-summary"><strong>${state.prospectResults.length} companies reviewed</strong><span>Company list: demo data. Duplicate check: real, partial (${state.knownCustomers.length} known customers loaded).</span></div><div class="prospect-grid">${state.prospectResults.map((candidate) => {
+  host.innerHTML = `<div class="prospect-summary"><strong>${state.prospectResults.length} companies reviewed</strong><span>${isPublicDemo ? `Portfolio demo comparison: ${state.knownCustomers.length} safe customer records loaded.` : `Company list: demo data. Duplicate check: real, partial (${state.knownCustomers.length} known customers loaded).`}</span></div><div class="prospect-grid">${state.prospectResults.map((candidate) => {
     const check = prospectDuplicateCheck(candidate);
     return `<article class="prospect-card"><header><div><span class="status-label ${check.statusClass}">${check.label}</span><h3>${escapeHTML(candidate.company)}</h3><p>${escapeHTML(candidate.state)} · ${escapeHTML(candidate.territory)} · ${escapeHTML(candidate.market)} · ${escapeHTML(candidate.domain)}</p></div><div class="equipment-thumb" aria-hidden="true"><span></span></div></header>
       <dl><dt>Account check</dt><dd>${escapeHTML(check.detail)}</dd><dt>Distance</dt><dd>${candidate.distance} miles</dd><dt>Equipment evidence</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.equipment) : "Image review not requested"}</dd><dt>Possible equipment</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.possibleModel) : "Not reviewed"}</dd><dt>Confidence</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.confidence) : "—"}</dd><dt>Ownership</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.ownership) : "Not evaluated"}</dd><dt>Evidence source</dt><dd>${state.prospectParams.visual ? escapeHTML(candidate.evidence) : "—"}</dd></dl>
@@ -2291,9 +2347,9 @@ function renderProspectResults() {
 function renderProspectWorkspace() {
   const params = state.prospectParams;
   elements.overlayBody.innerHTML = `<div class="workbench prospect-workbench">
-    <section class="prospect-controls"><header><div><h3>Rule-Controlled Search</h3><p>Company discovery is demo data pending a real search source. Customer duplicate-check runs against a real, partial GP export.</p></div><span class="demo-data-label">Mixed: demo discovery + real duplicate-check</span></header>
+    <section class="prospect-controls"><header><div><h3>Rule-Controlled Search</h3><p>${isPublicDemo ? "Company discovery and duplicate-checking run entirely on safe portfolio demo data." : "Company discovery is demo data pending a real search source. Customer duplicate-check runs against a real, partial GP export."}</p></div><span class="demo-data-label">${isPublicDemo ? "Portfolio demo data" : "Mixed: demo discovery + real duplicate-check"}</span></header>
       <div class="prospect-fields"><label class="field"><span>Territory</span><select id="prospectTerritory">${["Nationwide", "Northeast", "Southeast", "Midwest", "Southwest", "West"].map((value) => `<option value="${value}" ${value === params.territory ? "selected" : ""}>${value}</option>`).join("")}</select></label><label class="field"><span>Market</span><select id="prospectMarket">${["All", "Geotechnical", "Environmental"].map((value) => `<option value="${value}" ${value === params.market ? "selected" : ""}>${value}</option>`).join("")}</select></label><label class="field"><span>Search radius</span><select id="prospectRadius">${["50", "100", "250", "Region-wide"].map((value) => `<option value="${value}" ${value === params.radius ? "selected" : ""}>${value}${/^\d+$/.test(value) ? " miles" : ""}</option>`).join("")}</select></label><label class="field field--wide"><span>Required terms</span><input id="prospectKeywords" value="${escapeHTML(params.keywords)}" placeholder="drilling, geotechnical, environmental..."></label></div>
-      <div class="prospect-rules"><label><input type="checkbox" checked disabled> Check company name against known real GP customer records</label><label><input id="prospectVisual" type="checkbox" ${params.visual ? "checked" : ""}> Review public images for equipment evidence</label><span>Observed equipment is evidence only. Ownership stays unconfirmed until supported by records or a rep.</span><button type="button" class="primary-button" data-run-prospect>Run Prospect Search</button></div>
+      <div class="prospect-rules"><label><input type="checkbox" checked disabled> ${isPublicDemo ? "Check company name against the demo customer list" : "Check company name against known real GP customer records"}</label><label><input id="prospectVisual" type="checkbox" ${params.visual ? "checked" : ""}> Review public images for equipment evidence</label><span>Observed equipment is evidence only. Ownership stays unconfirmed until supported by records or a rep.</span><button type="button" class="primary-button" data-run-prospect>Run Prospect Search</button></div>
     </section><section id="prospectResults" class="prospect-results"></section></div>`;
   renderProspectResults();
 }
@@ -2405,9 +2461,11 @@ function renderCalibItem(item, index) {
 }
 
 function renderCalibResultPanel(record, statusNote) {
-  const emailLine = statusNote || (record.emailed
-    ? "Emailed to jon.white@mobiledrill.net."
-    : "Not emailed yet — email sending isn't configured (needs a Netlify env var). Result is saved and visible in the Admin Console.");
+  const emailLine = isPublicDemo
+    ? "Portfolio sandbox: this practice result stays only in this browser."
+    : (statusNote || (record.emailed
+      ? "Result emailed to the training administrator."
+      : "Not emailed yet — email sending isn't configured. Result is saved and visible in the Admin Console."));
   return `<div class="calib-result ${record.outcome === "PASS" ? "calib-result--pass" : "calib-result--retrain"}">
     <span class="status-label ${record.outcome === "PASS" ? "status-label--good" : "status-label--warn"}">${record.outcome === "PASS" ? "Pass" : "Retrain / retest required"}</span>
     ${record.missed.length ? `<ul>${record.missed.map((note) => `<li>${escapeHTML(note)}</li>`).join("")}</ul>` : `<p>Matches Module 010's pass standard for this scenario.</p>`}
@@ -2417,6 +2475,7 @@ function renderCalibResultPanel(record, statusNote) {
 }
 
 async function sendCalibrationResultEmail(record) {
+  if (isPublicDemo) return false;
   try {
     const response = await fetch("/.netlify/functions/send-calibration-result", {
       method: "POST",
@@ -2485,7 +2544,7 @@ function gradeCalibrationScenario() {
     state.calibLocks[calibLockKey(record.repInitials, record.scenarioId)] = true;
     saveCalibLocks();
   }
-  resultHost.innerHTML = renderCalibResultPanel(record, "Sending result to jon.white@mobiledrill.net...");
+  resultHost.innerHTML = renderCalibResultPanel(record, isPublicDemo ? "Portfolio sandbox: saving this result on this device." : "Sending result to the training administrator...");
   sendCalibrationResultEmail(record).then((sent) => {
     record.emailed = sent;
     saveCalibResults();
