@@ -12,6 +12,7 @@
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const { internalAccess } = require("./_internal-access");
 
 function lineExtended(line) {
   return Number(line.quantity || 0) * Number(line.unit_price || 0) - Number(line.discount || 0);
@@ -58,6 +59,8 @@ function summarize(orders) {
 }
 
 exports.handler = async (event) => {
+  const access = internalAccess(event);
+  if (!access.ok) return access.response;
   if (event.httpMethod !== "GET") {
     return { statusCode: 405, body: "Method not allowed" };
   }

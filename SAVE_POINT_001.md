@@ -1,7 +1,7 @@
 # Save Point 001 — Mobile Drill Brain (MDB)
 
 **Date:** 2026-08-16
-**Live site:** https://mobiledrilldemo.netlify.app (now password-protected — see below)
+**Live site at the time:** https://mobiledrilldemo.netlify.app
 **Repo:** github.com/Jwhite1218-blip/MDB_GitHub_Current
 **Latest commit:** `bbd14a6`
 
@@ -94,13 +94,10 @@ row still uses the existing deterministic demo seed (same fake numbers for
 everyone, hashed from the part number), so only actually-edited parts need
 to sync.
 
-**Site-wide password gate turned on**, closing the "anyone on the internet
-can hit the app or its raw Function endpoints with zero credentials" gap.
-Password: `MobileDrill2026`. Deliberately the fast/no-code option, not real
-per-rep auth — the identity picker still lets anyone claim to be anyone once
-past the gate. User chose this specifically because he'd already shared the
-live link with external testers and didn't want to disrupt them with real
-accounts.
+**A temporary site-wide password gate was used**, closing the immediate
+"anyone on the internet can hit the app or its raw Function endpoints"
+gap. The historical credential has been removed from this repository. It was
+a stopgap, not real per-rep authentication.
 
 ## Infrastructure gotchas (don't re-debug these)
 
@@ -109,11 +106,10 @@ accounts.
   needed explicit `GRANT ... TO service_role` statements even though
   service_role is meant to be the all-access key. Baked into `schema.sql`
   now.
-- **The Netlify env-var tool's `envVarIsSecret: true` flag silently drops
-  the value** — tested reproducibly (set it twice, value never persisted;
-  set as non-secret, worked immediately). Both `SUPABASE_URL` and
-  `SUPABASE_SERVICE_KEY` are stored as regular (non-secret) env vars on the
-  real site. Low risk since it's a single-member Netlify team.
+- **Historical deployment note:** an earlier Netlify setup required the
+  variables to be re-entered through the dashboard after a secret-value save
+  failed. Treat `SUPABASE_SERVICE_KEY` as a server-only secret in every
+  environment; never copy it into browser code or public documentation.
 - **Background "refresh on workspace open" can race a just-created
   record.** Opening Quotes/Orders kicks off a background refetch to pick up
   other reps' changes. If a new quote/order's debounced save (600ms) hadn't
