@@ -119,7 +119,13 @@ create table if not exists quote_lines (
   unit_price numeric not null default 0,
   discount numeric not null default 0,
   taxable boolean not null default false,
-  source text not null default 'MDB demo'
+  source text not null default 'MDB demo',
+  constraint order_lines_shipped_within_ordered_check check (shipped_qty >= 0 and shipped_qty <= quantity),
+  constraint order_lines_reserved_within_remaining_check check (reserved_qty >= 0 and reserved_qty + shipped_qty <= quantity),
+  constraint order_lines_to_ship_within_reserved_check check (qty_to_ship >= 0 and qty_to_ship <= reserved_qty),
+  constraint order_lines_invoiced_within_shipped_check check (invoiced_qty >= 0 and invoiced_qty <= shipped_qty),
+  constraint order_lines_to_invoice_within_shipped_check check (qty_to_invoice >= 0 and qty_to_invoice + invoiced_qty <= shipped_qty),
+  constraint order_lines_backorder_within_remaining_check check (backorder_qty >= 0 and backorder_qty <= quantity - shipped_qty)
 );
 
 create index if not exists quote_lines_quote_id_idx on quote_lines (quote_id);
@@ -151,7 +157,12 @@ create table if not exists orders (
   length_in numeric not null default 0,
   width_in numeric not null default 0,
   height_in numeric not null default 0,
-  status text not null default 'Open' check (status in ('Open', 'Closed')),
+  location_code text not null default 'MAIN',
+  status text not null default 'Open' check (status in ('Open', 'Released', 'Closed')),
+  released_at timestamptz,
+  released_by_initials text not null default '',
+  released_by_name text not null default '',
+  closed_at timestamptz,
   originator_initials text not null default '',
   originator_name text not null default '',
   last_modified_by_initials text not null default '',
@@ -170,7 +181,11 @@ create table if not exists order_lines (
   category text not null default '',
   uom text not null default 'EA',
   quantity int not null default 1 check (quantity between 1 and 5000),
+  reserved_qty int not null default 0 check (reserved_qty >= 0),
+  qty_to_ship int not null default 0 check (qty_to_ship >= 0),
   shipped_qty int not null default 0,
+  qty_to_invoice int not null default 0 check (qty_to_invoice >= 0),
+  invoiced_qty int not null default 0 check (invoiced_qty >= 0),
   backorder_qty int not null default 0,
   unit_price numeric not null default 0,
   discount numeric not null default 0,
@@ -178,11 +193,25 @@ create table if not exists order_lines (
   source text not null default 'MDB demo'
 );
 
+create table if not exists order_events (
+  event_key text primary key,
+  order_id text not null references orders(id) on delete cascade,
+  event_type text not null check (event_type in ('Created', 'Released', 'Reopened', 'Reserved', 'Shipment', 'Invoice', 'Closed', 'Edited')),
+  summary text not null,
+  detail text not null default '',
+  actor_initials text not null default '',
+  actor_name text not null default '',
+  created_at timestamptz not null default now(),
+  constraint order_events_summary_not_blank_check check (btrim(summary) <> '')
+);
+
 create index if not exists order_lines_order_id_idx on order_lines (order_id);
 create index if not exists order_lines_item_id_idx on order_lines (item_id) where item_id is not null;
 create index if not exists order_lines_category_idx on order_lines (category);
 create index if not exists orders_status_idx on orders (status);
 create index if not exists orders_created_at_idx on orders (created_at desc);
+create index if not exists orders_location_status_idx on orders (location_code, status);
+create index if not exists order_events_order_created_idx on order_events (order_id, created_at desc);
 
 -- Inventory is a SPARSE OVERRIDE table -- a part with no row here just uses
 -- the existing deterministic demo seed (same fake on-hand/allocated/bin/price
@@ -217,6 +246,7 @@ alter table public.quotes enable row level security;
 alter table public.quote_lines enable row level security;
 alter table public.orders enable row level security;
 alter table public.order_lines enable row level security;
+alter table public.order_events enable row level security;
 alter table public.inventory_stock enable row level security;
 
 revoke all on table public.items from anon, authenticated, public;
@@ -227,6 +257,7 @@ revoke all on table public.quotes from anon, authenticated, public;
 revoke all on table public.quote_lines from anon, authenticated, public;
 revoke all on table public.orders from anon, authenticated, public;
 revoke all on table public.order_lines from anon, authenticated, public;
+revoke all on table public.order_events from anon, authenticated, public;
 revoke all on table public.inventory_stock from anon, authenticated, public;
 
 -- service_role bypasses Row Level Security but NOT ordinary table grants.
@@ -239,6 +270,7 @@ revoke all on public.quotes from service_role;
 revoke all on public.quote_lines from service_role;
 revoke all on public.orders from service_role;
 revoke all on public.order_lines from service_role;
+revoke all on public.order_events from service_role;
 revoke all on public.inventory_stock from service_role;
 grant select, insert, update on public.items to service_role;
 grant select, insert, update, delete on public.item_aliases to service_role;
@@ -247,6 +279,7 @@ grant select, insert, update on public.quotes to service_role;
 grant select, insert, update, delete on public.quote_lines to service_role;
 grant select, insert, update on public.orders to service_role;
 grant select, insert, update, delete on public.order_lines to service_role;
+grant select, insert, update on public.order_events to service_role;
 grant select, insert, update on public.inventory_stock to service_role;
 grant usage, select on sequence public.master_no_seq to service_role;
 grant usage, select on sequence public.order_no_seq to service_role;

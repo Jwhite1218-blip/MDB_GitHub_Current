@@ -1,4 +1,4 @@
-// Fetches every Open order (with its lines) from Supabase for the Orders
+// Fetches every order (with lines and execution events) from Supabase for the Orders
 // workspace's team-wide list. Requires SUPABASE_URL and SUPABASE_SERVICE_KEY
 // environment variables. Without them, returns { configured: false } and the
 // frontend falls back to localStorage -- nothing breaks while this is being
@@ -30,7 +30,12 @@ function toCamelOrder(row) {
     lengthIn: Number(row.length_in),
     widthIn: Number(row.width_in),
     heightIn: Number(row.height_in),
+    locationCode: row.location_code || "MAIN",
     status: row.status,
+    releasedAt: row.released_at,
+    releasedByInitials: row.released_by_initials,
+    releasedByName: row.released_by_name,
+    closedAt: row.closed_at,
     originatorInitials: row.originator_initials,
     originatorName: row.originator_name,
     lastModifiedByInitials: row.last_modified_by_initials,
@@ -46,12 +51,27 @@ function toCamelOrder(row) {
         category: line.category,
         uom: line.uom,
         quantity: line.quantity,
+        reservedQty: line.reserved_qty,
+        qtyToShip: line.qty_to_ship,
         shippedQty: line.shipped_qty,
+        qtyToInvoice: line.qty_to_invoice,
+        invoicedQty: line.invoiced_qty,
         backorderQty: line.backorder_qty,
         unitPrice: Number(line.unit_price),
         discount: Number(line.discount),
         taxable: line.taxable,
         source: line.source,
+      })),
+    events: (row.order_events || [])
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .map((entry) => ({
+        key: entry.event_key,
+        type: entry.event_type,
+        summary: entry.summary,
+        detail: entry.detail,
+        actorInitials: entry.actor_initials,
+        actorName: entry.actor_name,
+        createdAt: entry.created_at,
       })),
   };
 }
@@ -69,7 +89,7 @@ exports.handler = async (event) => {
 
   try {
     const response = await fetch(
-      `${SUPABASE_URL}/rest/v1/orders?select=*,order_lines(*)&order=created_at.desc`,
+      `${SUPABASE_URL}/rest/v1/orders?select=*,order_lines(*),order_events(*)&order=created_at.desc`,
       { headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` } }
     );
     if (!response.ok) {

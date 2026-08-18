@@ -157,7 +157,7 @@ const state = {
   pendingStockParts: new Set(),
   stockSaveTimers: {},
   activeOrderId: "",
-  orderListOpen: { master: true, mine: true },
+  orderListOpen: { open: true, released: true, closed: false },
   orderSearchTerm: "",
   orderSearchTimer: null,
   rigQuoteFiles: {},
@@ -768,7 +768,7 @@ function newOrder(overrides = {}) {
   const identity = state.identity;
   const now = new Date().toISOString();
   const customer = customers.find((item) => item.id === state.selectedCustomerId);
-  return {
+  const order = {
     id: `order-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     orderNumber: "",
     masterNo: null,
@@ -778,12 +778,51 @@ function newOrder(overrides = {}) {
     shipToContact: customer?.contact || "", shipToAddress: customer?.address || "",
     reqShipDate: "", notes: "", misc: 0, freight: 0, tradeDiscount: 0, lines: [],
     weightLbs: 0, lengthIn: 0, widthIn: 0, heightIn: 0,
+    locationCode: "MAIN",
     status: "Open",
+    releasedAt: null, releasedByInitials: "", releasedByName: "", closedAt: null,
+    events: [],
     originatorInitials: identity?.initials || "", originatorName: identity?.name || "",
     lastModifiedByInitials: identity?.initials || "", lastModifiedByName: identity?.name || "",
     createdAt: now, lastModifiedAt: now,
     ...overrides,
   };
+  if (!order.events.length) recordOrderEvent(order, "Created", "Order created", "Open for entry and review.");
+  return normalizeOrder(order);
+}
+
+function recordOrderEvent(order, type, summary, detail = "") {
+  const identity = state.identity || publicDemoIdentity;
+  order.events ||= [];
+  order.events.unshift({
+    key: `event-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    type,
+    summary,
+    detail,
+    actorInitials: identity?.initials || "",
+    actorName: identity?.name || "",
+    createdAt: new Date().toISOString(),
+  });
+}
+
+function normalizeOrder(order) {
+  order.locationCode ||= "MAIN";
+  order.events = Array.isArray(order.events) ? order.events : [];
+  order.releasedAt ||= null;
+  order.releasedByInitials ||= "";
+  order.releasedByName ||= "";
+  order.closedAt ||= null;
+  order.lines = (Array.isArray(order.lines) ? order.lines : []).map((line) => ({
+    ...line,
+    quantity: Math.max(1, Number(line.quantity) || 1),
+    reservedQty: Math.max(0, Number(line.reservedQty) || 0),
+    qtyToShip: Math.max(0, Number(line.qtyToShip) || 0),
+    shippedQty: Math.max(0, Number(line.shippedQty) || 0),
+    qtyToInvoice: Math.max(0, Number(line.qtyToInvoice) || 0),
+    invoicedQty: Math.max(0, Number(line.invoicedQty) || 0),
+    backorderQty: Math.max(0, Number(line.backorderQty) || 0),
+  }));
+  return order;
 }
 
 async function loadQuotes() {
@@ -871,7 +910,7 @@ function requireIdentity(callback) {
 async function loadOrders() {
   if (isPublicDemo) {
     state.ordersBackendConfigured = false;
-    state.orders = safeLoad("mdb-demo-orders", []);
+    state.orders = safeLoad("mdb-demo-orders", []).map(normalizeOrder);
     return;
   }
   try {
@@ -884,7 +923,7 @@ async function loadOrders() {
         // debounced save hasn't landed yet.
         const serverIds = new Set(data.orders.map((order) => order.id));
         const unsavedLocal = state.orders.filter((order) => !serverIds.has(order.id));
-        state.orders = [...unsavedLocal, ...data.orders];
+        state.orders = [...unsavedLocal, ...data.orders].map(normalizeOrder);
         state.ordersBackendConfigured = true;
         saveOrders();
         return;
@@ -894,7 +933,7 @@ async function loadOrders() {
     // backend unreachable -- fall through to the local copy
   }
   state.ordersBackendConfigured = false;
-  state.orders = safeLoad("mdb-demo-orders", []);
+  state.orders = safeLoad("mdb-demo-orders", []).map(normalizeOrder);
 }
 
 function saveOrders() {
@@ -958,19 +997,21 @@ function closeBackorderConfirm() {
 function applyLineQuantity(line, requestedQty, onResolved) {
   const stock = getStock(line.part);
   const available = Math.max(0, Number(stock.onHand) - Number(stock.allocated));
-  const commit = (shipped, backorder) => {
-    stock.onHand = Number(stock.onHand) - shipped;
-    saveStock();
+  const commit = (projectedBackorder) => {
     line.quantity = requestedQty;
-    line.shippedQty = shipped;
-    line.backorderQty = backorder;
+    line.reservedQty = Math.min(Number(line.reservedQty) || 0, requestedQty);
+    line.qtyToShip = Math.min(Number(line.qtyToShip) || 0, line.reservedQty);
+    line.shippedQty = Math.min(Number(line.shippedQty) || 0, requestedQty);
+    line.qtyToInvoice = Math.min(Number(line.qtyToInvoice) || 0, line.shippedQty);
+    line.invoicedQty = Math.min(Number(line.invoicedQty) || 0, line.shippedQty);
+    line.backorderQty = Math.max(0, projectedBackorder);
     onResolved(true);
   };
-  if (requestedQty <= available) { commit(requestedQty, 0); return; }
+  if (requestedQty <= available) { commit(0); return; }
   openBackorderConfirm({
     part: line.part,
     description: line.description,
-    onYes: () => { closeBackorderConfirm(); commit(available, requestedQty - available); },
+    onYes: () => { closeBackorderConfirm(); commit(requestedQty - available); },
     onNo: () => { closeBackorderConfirm(); onResolved(false); },
   });
 }
@@ -2064,16 +2105,13 @@ function closeQuoteModal() {
 function convertQuoteToOrder(quote) {
   const backorderedParts = [];
   const orderLines = quote.lines.map((line) => {
-    if (!line.part) return { ...line, shippedQty: line.quantity, backorderQty: 0 };
+    if (!line.part) return { ...line, reservedQty: 0, qtyToShip: 0, shippedQty: 0, qtyToInvoice: 0, invoicedQty: 0, backorderQty: 0 };
     const stock = getStock(line.part);
     const available = Math.max(0, Number(stock.onHand) - Number(stock.allocated));
-    const shipped = Math.min(line.quantity, available);
-    const backorder = line.quantity - shipped;
-    stock.onHand = Number(stock.onHand) - shipped;
+    const backorder = Math.max(0, Number(line.quantity) - available);
     if (backorder > 0) backorderedParts.push(line.part);
-    return { ...line, shippedQty: shipped, backorderQty: backorder };
+    return { ...line, reservedQty: 0, qtyToShip: 0, shippedQty: 0, qtyToInvoice: 0, invoicedQty: 0, backorderQty: backorder };
   });
-  saveStock();
 
   const order = newOrder({
     convertedFromQuoteId: quote.id,
@@ -2092,12 +2130,12 @@ function convertQuoteToOrder(quote) {
   closeQuoteModal();
   openOrderModal(order.id);
   showToast(backorderedParts.length
-    ? `Order created — backorder due to inventory on: ${backorderedParts.join(", ")}`
-    : "Order created — everything shipped from stock");
+    ? `Order created — projected shortage on: ${backorderedParts.join(", ")}. Release when ready to reserve stock.`
+    : "Order created — release it when ready to reserve stock");
 }
 
-function sortedOpenOrders() {
-  return state.orders.filter((order) => order.status === "Open").sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+function sortedOrdersByStatus(status) {
+  return state.orders.filter((order) => order.status === status).sort((a, b) => new Date(b.lastModifiedAt || b.createdAt) - new Date(a.lastModifiedAt || a.createdAt));
 }
 
 function orderCompanyName(order) {
@@ -2106,14 +2144,158 @@ function orderCompanyName(order) {
 }
 
 function orderTotals(order) {
+  if (!order.lines.length) return { subtotal: 0, total: 0 };
   const subtotal = order.lines.reduce((sum, line) => sum + lineExtended(line), 0);
   const total = subtotal + Number(order.misc || 0) + Number(order.freight || 0) - Number(order.tradeDiscount || 0);
   return { subtotal, total };
 }
 
+function orderRemainingQty(line) {
+  return Math.max(0, Number(line.quantity || 0) - Number(line.shippedQty || 0));
+}
+
+function orderReadiness(order) {
+  const missing = [];
+  if (!order.customerId) missing.push("customer");
+  if (!order.lines.length) missing.push("at least one line");
+  if (order.lines.some((line) => !String(line.part || line.description || "").trim())) missing.push("part or description on every line");
+  return { missing, canRelease: order.status === "Open" && missing.length === 0 };
+}
+
+function orderFulfillment(order) {
+  const ordered = order.lines.reduce((sum, line) => sum + Number(line.quantity || 0), 0);
+  const reserved = order.lines.reduce((sum, line) => sum + Number(line.reservedQty || 0), 0);
+  const shipped = order.lines.reduce((sum, line) => sum + Number(line.shippedQty || 0), 0);
+  const invoiced = order.lines.reduce((sum, line) => sum + Number(line.invoicedQty || 0), 0);
+  const backordered = order.lines.reduce((sum, line) => sum + Number(line.backorderQty || 0), 0);
+  const toShip = order.lines.reduce((sum, line) => sum + Number(line.qtyToShip || 0), 0);
+  const toInvoice = order.lines.reduce((sum, line) => sum + Number(line.qtyToInvoice || 0), 0);
+  return { ordered, reserved, shipped, invoiced, backordered, toShip, toInvoice };
+}
+
+function shippingRateReadiness(order) {
+  const missing = [];
+  if (!order.lines.length) missing.push("order lines");
+  if (!/\b\d{5}(-\d{4})?\b/.test(order.shipToAddress || "")) missing.push("Ship To zip code");
+  if (!(Number(order.weightLbs) > 0)) missing.push("weight");
+  if (!(Number(order.lengthIn) > 0 && Number(order.widthIn) > 0 && Number(order.heightIn) > 0)) missing.push("package dimensions");
+  return { missing, ready: missing.length === 0 };
+}
+
+function reserveAvailableForOrder(order, { record = true } = {}) {
+  let reservedNow = 0;
+  order.lines.forEach((line) => {
+    if (!line.part) return;
+    const stock = getStock(line.part);
+    const available = Math.max(0, Number(stock.onHand) - Number(stock.allocated));
+    const remainingUnreserved = Math.max(0, orderRemainingQty(line) - Number(line.reservedQty || 0));
+    const reserve = Math.min(available, remainingUnreserved);
+    if (reserve > 0) {
+      stock.allocated = Number(stock.allocated) + reserve;
+      line.reservedQty = Number(line.reservedQty || 0) + reserve;
+      line.qtyToShip = Number(line.reservedQty);
+      reservedNow += reserve;
+    }
+    line.backorderQty = Math.max(0, orderRemainingQty(line) - Number(line.reservedQty || 0));
+  });
+  saveStock();
+  if (record && reservedNow > 0) recordOrderEvent(order, "Reserved", "Inventory reserved", `${reservedNow} unit${reservedNow === 1 ? "" : "s"} reserved at ${order.locationCode || "MAIN"}.`);
+  return reservedNow;
+}
+
+function releaseOrder(order) {
+  const readiness = orderReadiness(order);
+  if (!readiness.canRelease) { showToast(`Can't release yet — add ${readiness.missing.join(" and ")}.`); return; }
+  order.status = "Released";
+  order.releasedAt = new Date().toISOString();
+  order.releasedByInitials = state.identity?.initials || publicDemoIdentity.initials;
+  order.releasedByName = state.identity?.name || publicDemoIdentity.name;
+  const reserved = reserveAvailableForOrder(order, { record: false });
+  const shortages = order.lines.filter((line) => Number(line.backorderQty) > 0).length;
+  recordOrderEvent(order, "Released", "Order released", `${reserved} unit${reserved === 1 ? "" : "s"} reserved${shortages ? `; ${shortages} line${shortages === 1 ? "" : "s"} still short` : "; ready for shipment"}.`);
+  touchOrder(order);
+  renderOrderModal();
+  showToast(shortages ? "Order released with projected shortages" : "Order released and stock reserved");
+}
+
+function reopenOrder(order) {
+  if (order.status !== "Released") return;
+  let releasedReservations = 0;
+  order.lines.forEach((line) => {
+    const reserved = Number(line.reservedQty || 0);
+    if (reserved > 0 && line.part) {
+      const stock = getStock(line.part);
+      stock.allocated = Math.max(0, Number(stock.allocated) - reserved);
+      releasedReservations += reserved;
+    }
+    line.reservedQty = 0;
+    line.qtyToShip = 0;
+    line.backorderQty = Math.max(0, orderRemainingQty(line));
+  });
+  saveStock();
+  order.status = "Open";
+  order.releasedAt = null;
+  order.releasedByInitials = "";
+  order.releasedByName = "";
+  recordOrderEvent(order, "Reopened", "Order reopened", `${releasedReservations} reserved unit${releasedReservations === 1 ? "" : "s"} returned to available inventory.`);
+  touchOrder(order);
+  renderOrderModal();
+  showToast("Order reopened for editing");
+}
+
+function postOrderShipment(order) {
+  if (order.status !== "Released") return;
+  let shippedNow = 0;
+  order.lines.forEach((line) => {
+    const ship = Math.min(Number(line.qtyToShip || 0), Number(line.reservedQty || 0), orderRemainingQty(line));
+    if (ship > 0 && line.part) {
+      const stock = getStock(line.part);
+      stock.onHand = Math.max(0, Number(stock.onHand) - ship);
+      stock.allocated = Math.max(0, Number(stock.allocated) - ship);
+    }
+    line.reservedQty = Math.max(0, Number(line.reservedQty || 0) - ship);
+    line.shippedQty = Number(line.shippedQty || 0) + ship;
+    line.qtyToShip = 0;
+    line.qtyToInvoice = Math.min(Number(line.shippedQty) - Number(line.invoicedQty || 0), Number(line.qtyToInvoice || 0) + ship);
+    line.backorderQty = Math.max(0, orderRemainingQty(line) - Number(line.reservedQty || 0));
+    shippedNow += ship;
+  });
+  if (!shippedNow) { showToast("Enter a quantity to ship first"); return; }
+  saveStock();
+  recordOrderEvent(order, "Shipment", "Shipment posted", `${shippedNow} unit${shippedNow === 1 ? "" : "s"} shipped from ${order.locationCode || "MAIN"}.`);
+  touchOrder(order);
+  renderOrderModal();
+  showToast(`${shippedNow} unit${shippedNow === 1 ? "" : "s"} posted as shipped`);
+}
+
+function postOrderInvoice(order) {
+  if (order.status !== "Released") return;
+  let invoicedNow = 0;
+  order.lines.forEach((line) => {
+    const availableToInvoice = Math.max(0, Number(line.shippedQty || 0) - Number(line.invoicedQty || 0));
+    const invoice = Math.min(Number(line.qtyToInvoice || 0), availableToInvoice);
+    line.invoicedQty = Number(line.invoicedQty || 0) + invoice;
+    line.qtyToInvoice = 0;
+    invoicedNow += invoice;
+  });
+  if (!invoicedNow) { showToast("Only shipped quantity can be invoiced"); return; }
+  recordOrderEvent(order, "Invoice", "Invoice posted", `${invoicedNow} unit${invoicedNow === 1 ? "" : "s"} invoiced.`);
+  const complete = order.lines.length > 0 && order.lines.every((line) => Number(line.shippedQty) >= Number(line.quantity) && Number(line.invoicedQty) >= Number(line.quantity));
+  if (complete) {
+    order.status = "Closed";
+    order.closedAt = new Date().toISOString();
+    recordOrderEvent(order, "Closed", "Order closed", "All ordered quantities shipped and invoiced.");
+  }
+  touchOrder(order);
+  renderOrderModal();
+  showToast(complete ? "Order fully shipped, invoiced, and closed" : `${invoicedNow} unit${invoicedNow === 1 ? "" : "s"} posted to invoice`);
+}
+
 async function fetchShippingRate() {
   const order = activeOrder();
   if (!order) return;
+  const readiness = shippingRateReadiness(order);
+  if (!readiness.ready) { showToast(`Rate needs ${readiness.missing.join(", ")}`); return; }
   const carrier = $("#orderRateCarrier")?.value || "UPS";
   const statusHost = $("#orderRateStatus");
   if (statusHost) statusHost.textContent = "Looking up rate...";
@@ -2147,18 +2329,28 @@ function renderOrderListSection(title, orders, sectionKey) {
       <span>${escapeHTML(title)} (${orders.length})</span><span class="quote-list-caret">${open ? "▾" : "▸"}</span>
     </button>
     ${open ? (orders.length
-      ? `<div class="quote-list-rows">${orders.map((order) => `<button type="button" class="quote-list-row" data-order-open="${order.id}"><strong>${escapeHTML(orderCompanyName(order))}</strong><span>${escapeHTML(order.orderNumber || "Pending #")}</span></button>`).join("")}</div>`
-      : '<p class="quote-list-empty">No open orders yet.</p>') : ""}
+      ? `<div class="quote-list-rows">${orders.map((order) => { const f = orderFulfillment(order); return `<button type="button" class="quote-list-row order-list-row" data-order-open="${order.id}"><span><strong>${escapeHTML(orderCompanyName(order))}</strong><small>${escapeHTML(order.orderNumber || "Pending #")} · ${escapeHTML(order.locationCode || "MAIN")}</small></span><span><b class="order-status-pill is-${order.status.toLowerCase()}">${escapeHTML(order.status)}</b><small>${f.shipped}/${f.ordered} shipped${f.backordered ? ` · ${f.backordered} short` : ""}</small></span></button>`; }).join("")}</div>`
+      : `<p class="quote-list-empty">No ${escapeHTML(title.toLowerCase())}.</p>`) : ""}
   </section>`;
 }
 
 function renderOrdersWorkspace() {
-  const openOrders = sortedOpenOrders();
-  const mine = state.identity ? openOrders.filter((order) => order.originatorInitials === state.identity.initials) : [];
+  const openOrders = sortedOrdersByStatus("Open");
+  const releasedOrders = sortedOrdersByStatus("Released");
+  const closedOrders = sortedOrdersByStatus("Closed");
+  const backordered = releasedOrders.filter((order) => orderFulfillment(order).backordered > 0).length;
+  const readyToInvoice = releasedOrders.filter((order) => orderFulfillment(order).toInvoice > 0).length;
   elements.overlayBody.innerHTML = `<div class="workbench quotes-workbench">
     <div class="operations-toolbar"><div><strong>Orders</strong><span>${isPublicDemo ? "Portfolio sandbox — changes stay on this device and are never sent to GP." : state.ordersBackendConfigured ? "Synced live across the team — not sent to GP." : "Browser-local only right now — not yet synced across devices, not sent to GP."}</span></div><button type="button" class="primary-button" data-order-new>Start New Order</button></div>
-    ${renderOrderListSection("All Open Orders", openOrders, "master")}
-    ${renderOrderListSection("My Orders", mine, "mine")}
+    <div class="order-metric-grid">
+      <div><span>Open entry</span><strong>${openOrders.length}</strong></div>
+      <div><span>Released</span><strong>${releasedOrders.length}</strong></div>
+      <div class="${backordered ? "has-warning" : ""}"><span>Lines short</span><strong>${backordered}</strong></div>
+      <div><span>Ready to invoice</span><strong>${readyToInvoice}</strong></div>
+    </div>
+    ${renderOrderListSection("Open for Entry", openOrders, "open")}
+    ${renderOrderListSection("Released to Warehouse", releasedOrders, "released")}
+    ${renderOrderListSection("Closed Orders", closedOrders, "closed")}
   </div>`;
 }
 
@@ -2256,7 +2448,8 @@ function renderOrderSearchResults() {
 function addOrderLine(part, description, price = 0, source = "MDB demo", category = "") {
   const order = activeOrder();
   if (!order) { showToast("Open an order first"); return; }
-  const line = { itemId: itemIdForPart(part), part: part || "", description: description || "", category, uom: "EA", quantity: 1, shippedQty: 0, backorderQty: 0, unitPrice: Number(price) || 0, discount: 0, taxable: false, source };
+  if (order.status !== "Open") { showToast("Reopen the order before adding items"); return; }
+  const line = { itemId: itemIdForPart(part), part: part || "", description: description || "", category, uom: "EA", quantity: 1, reservedQty: 0, qtyToShip: 0, shippedQty: 0, qtyToInvoice: 0, invoicedQty: 0, backorderQty: 0, unitPrice: Number(price) || 0, discount: 0, taxable: false, source };
   order.lines.push(line);
   applyLineQuantity(line, 1, (accepted) => {
     if (!accepted) { order.lines.pop(); return; }
@@ -2268,19 +2461,26 @@ function addOrderLine(part, description, price = 0, source = "MDB demo", categor
 
 function renderOrderLines(order) {
   if (!order.lines.length) return '<div class="quote-empty">No lines yet. Search above to add Tooling or Rig Parts.</div>';
-  return order.lines.map((line, index) => `<div class="order-line" data-line-index="${index}">
-      <input class="line-input" data-line-field="part" value="${escapeHTML(line.part)}" aria-label="Part number">
-      <input class="line-input line-description" data-line-field="description" value="${escapeHTML(line.description)}" aria-label="Description">
-      <input class="line-input line-uom" data-line-field="uom" value="${escapeHTML(line.uom || "EA")}" aria-label="Unit of measure">
-      <input class="line-input" type="number" min="1" max="5000" step="1" data-line-field="quantity" value="${line.quantity}" aria-label="Ordered quantity">
-      <input class="line-input" type="number" min="0" data-line-field="shippedQty" value="${line.shippedQty || 0}" aria-label="Shipped quantity">
-      <input class="line-input ${line.backorderQty ? "is-backordered" : ""}" type="number" min="0" data-line-field="backorderQty" value="${line.backorderQty || 0}" aria-label="Backorder quantity">
-      <input class="line-input" type="number" min="0" step="0.01" data-line-field="unitPrice" value="${line.unitPrice}" aria-label="Unit price">
-      <input class="line-input" type="number" min="0" step="0.01" data-line-field="discount" value="${line.discount}" aria-label="Discount amount">
-      <input type="checkbox" data-line-field="taxable" ${line.taxable ? "checked" : ""} aria-label="Taxable">
+  const entryLocked = order.status !== "Open" ? "disabled" : "";
+  const fulfillmentLocked = order.status !== "Released" ? "disabled" : "";
+  return order.lines.map((line, index) => { const available = line.part ? Math.max(0, Number(getStock(line.part).onHand) - Number(getStock(line.part).allocated)) : 0; const maxShip = Math.min(Number(line.reservedQty || 0), orderRemainingQty(line)); const maxInvoice = Math.max(0, Number(line.shippedQty || 0) - Number(line.invoicedQty || 0)); return `<div class="order-line" data-line-index="${index}">
+      <input class="line-input" data-line-field="part" value="${escapeHTML(line.part)}" aria-label="Part number" ${entryLocked}>
+      <input class="line-input line-description" data-line-field="description" value="${escapeHTML(line.description)}" aria-label="Description" ${entryLocked}>
+      <input class="line-input line-uom" data-line-field="uom" value="${escapeHTML(line.uom || "EA")}" aria-label="Unit of measure" ${entryLocked}>
+      <input class="line-input" type="number" min="1" max="5000" step="1" data-line-field="quantity" value="${line.quantity}" aria-label="Ordered quantity" ${entryLocked}>
+      <span class="order-line-readout">${available}</span>
+      <span class="order-line-readout">${line.reservedQty || 0}</span>
+      <input class="line-input" type="number" min="0" max="${maxShip}" step="1" data-line-field="qtyToShip" value="${line.qtyToShip || 0}" aria-label="Quantity to ship" ${fulfillmentLocked}>
+      <span class="order-line-readout">${line.shippedQty || 0}</span>
+      <input class="line-input" type="number" min="0" max="${maxInvoice}" step="1" data-line-field="qtyToInvoice" value="${line.qtyToInvoice || 0}" aria-label="Quantity to invoice" ${fulfillmentLocked}>
+      <span class="order-line-readout">${line.invoicedQty || 0}</span>
+      <span class="order-line-readout ${line.backorderQty ? "is-backordered" : ""}">${line.backorderQty || 0}</span>
+      <input class="line-input" type="number" min="0" step="0.01" data-line-field="unitPrice" value="${line.unitPrice}" aria-label="Unit price" ${entryLocked}>
+      <input class="line-input" type="number" min="0" step="0.01" data-line-field="discount" value="${line.discount}" aria-label="Discount amount" ${entryLocked}>
+      <input type="checkbox" data-line-field="taxable" ${line.taxable ? "checked" : ""} aria-label="Taxable" ${entryLocked}>
       <strong class="line-extended">${formatCurrency(lineExtended(line))}</strong>
-      <button class="line-remove" type="button" data-line-remove="${index}" aria-label="Remove line">×</button>
-    </div>`).join("");
+      ${order.status === "Open" ? `<button class="line-remove" type="button" data-line-remove="${index}" aria-label="Remove line">×</button>` : "<span></span>"}
+    </div>`; }).join("");
 }
 
 function updateOrderNumbers() {
@@ -2299,57 +2499,73 @@ function renderOrderModal() {
   const order = activeOrder();
   if (!order) return;
   const totals = orderTotals(order);
+  const fulfillment = orderFulfillment(order);
+  const readiness = orderReadiness(order);
+  const rateReadiness = shippingRateReadiness(order);
+  const editable = order.status === "Open";
+  const locked = editable ? "" : "disabled";
+  const summaryLocked = editable && order.lines.length ? "" : "disabled";
+  const actionButtons = order.status === "Open"
+    ? `<button type="button" class="primary-button" data-order-release ${readiness.canRelease ? "" : "disabled"}>Release Order</button>`
+    : order.status === "Released"
+      ? `<button type="button" class="secondary-button" data-order-reopen>Reopen</button><button type="button" class="secondary-button" data-order-reserve>Reserve Available</button><button type="button" class="primary-button" data-order-post-shipment ${fulfillment.toShip > 0 ? "" : "disabled"}>Post Shipment</button><button type="button" class="primary-button" data-order-post-invoice ${fulfillment.toInvoice > 0 ? "" : "disabled"}>Post Invoice</button>`
+      : '<span class="order-closed-message">All ordered quantities are shipped and invoiced.</span>';
+  const timeline = order.events.length ? order.events.map((event) => `<div class="order-event"><span class="order-event-dot"></span><div><strong>${escapeHTML(event.summary)}</strong><span>${escapeHTML(event.detail || "")}</span><small>${new Date(event.createdAt).toLocaleString()}${event.actorName ? ` · ${escapeHTML(event.actorName)}` : ""}</small></div></div>`).join("") : '<p class="quote-list-empty">No activity recorded yet.</p>';
   elements.orderModalTitle.textContent = `${order.orderNumber || "New Order"} — ${orderCompanyName(order)}`;
   elements.orderModalBody.innerHTML = `<div class="quote-context"><div><span>Order</span><strong>${escapeHTML(orderCompanyName(order))}</strong>${order.masterNo ? `<small>Master No. ${escapeHTML(String(order.masterNo))}</small>` : ""}${order.convertedFromQuoteId ? `<small>Converted from a quote</small>` : ""}</div>
-      <label class="field quote-status-field"><span>Status</span><select data-order-meta-field="status">${["Open", "Closed"].map((option) => `<option ${option === order.status ? "selected" : ""}>${option}</option>`).join("")}</select></label>
+      <span class="order-status-pill is-${order.status.toLowerCase()}">${escapeHTML(order.status)}</span>
     </div>
     <p class="quote-attribution">Originated by ${escapeHTML(order.originatorName || "Unknown")}${order.originatorInitials ? ` (${escapeHTML(order.originatorInitials)})` : ""} · Last edited by ${escapeHTML(order.lastModifiedByName || "Unknown")} ${order.lastModifiedAt ? new Date(order.lastModifiedAt).toLocaleString() : ""}</p>
-    <div class="quote-search-wrap">
+    <div class="order-action-bar">${actionButtons}</div>
+    <div class="order-readiness ${readiness.missing.length ? "has-warning" : "is-ready"}"><strong>${readiness.missing.length ? "Before release" : order.status === "Open" ? "Ready to release" : "Execution status"}</strong><span>${readiness.missing.length ? `Add ${escapeHTML(readiness.missing.join(", "))}.` : `${fulfillment.reserved} reserved · ${fulfillment.shipped} shipped · ${fulfillment.invoiced} invoiced${fulfillment.backordered ? ` · ${fulfillment.backordered} short` : ""}`}</span></div>
+    ${editable ? `<div class="quote-search-wrap">
       <label class="field"><span>Search Tooling &amp; Rig Parts to add</span><input type="text" id="orderSearchInput" autocomplete="off" spellcheck="false" placeholder="Part number or description..." value="${escapeHTML(state.orderSearchTerm)}"></label>
       <div id="orderSearchResults" class="quote-search-results"></div>
-    </div>
+    </div>` : ""}
     <div class="quote-layout">
       <section class="quote-form">
         <div class="quote-fields">
-          <label class="field"><span>Customer</span><select data-order-meta-field="customerId">${customerOptions(order.customerId)}</select></label>
-          <label class="field"><span>Customer PO / Ref</span><input data-order-meta-field="customerPo" value="${escapeHTML(order.customerPo)}"></label>
-          <label class="field"><span>Salesperson</span><input data-order-meta-field="salesperson" value="${escapeHTML(order.salesperson)}"></label>
-          <label class="field"><span>Payment Terms</span><select data-order-meta-field="terms">${paymentTermsOptions.map((option) => `<option ${option === order.terms ? "selected" : ""}>${option}</option>`).join("")}</select></label>
-          <label class="field"><span>Shipping Method</span><select data-order-meta-field="shipVia">${shipViaOptions.map((option) => `<option ${option === order.shipVia ? "selected" : ""}>${option}</option>`).join("")}</select></label>
-          <label class="field"><span>Req Ship Date</span><input type="date" data-order-meta-field="reqShipDate" value="${escapeHTML(order.reqShipDate || "")}"></label>
+          <label class="field"><span>Customer</span><select data-order-meta-field="customerId" ${locked}>${customerOptions(order.customerId)}</select></label>
+          <label class="field"><span>Customer PO / Ref</span><input data-order-meta-field="customerPo" value="${escapeHTML(order.customerPo)}" ${locked}></label>
+          <label class="field"><span>Salesperson</span><input data-order-meta-field="salesperson" value="${escapeHTML(order.salesperson)}" ${locked}></label>
+          <label class="field"><span>Location</span><input data-order-meta-field="locationCode" value="${escapeHTML(order.locationCode || "MAIN")}" ${locked}></label>
+          <label class="field"><span>Payment Terms</span><select data-order-meta-field="terms" ${locked}>${paymentTermsOptions.map((option) => `<option ${option === order.terms ? "selected" : ""}>${option}</option>`).join("")}</select></label>
+          <label class="field"><span>Shipping Method</span><select data-order-meta-field="shipVia" ${locked}>${shipViaOptions.map((option) => `<option ${option === order.shipVia ? "selected" : ""}>${option}</option>`).join("")}</select></label>
+          <label class="field"><span>Req Ship Date</span><input type="date" data-order-meta-field="reqShipDate" value="${escapeHTML(order.reqShipDate || "")}" ${locked}></label>
         </div>
         <div class="quote-fields quote-fields--shipto">
-          <label class="field"><span>Ship To Contact</span><input data-order-meta-field="shipToContact" value="${escapeHTML(order.shipToContact || "")}"></label>
-          <label class="field field--wide"><span>Ship To Address</span><input data-order-meta-field="shipToAddress" value="${escapeHTML(order.shipToAddress || "")}"></label>
+          <label class="field"><span>Ship To Contact</span><input data-order-meta-field="shipToContact" value="${escapeHTML(order.shipToContact || "")}" ${locked}></label>
+          <label class="field field--wide"><span>Ship To Address</span><input data-order-meta-field="shipToAddress" value="${escapeHTML(order.shipToAddress || "")}" ${locked}></label>
         </div>
         <div class="quote-fields quote-fields--dims">
-          <label class="field"><span>Weight (lbs)</span><input type="number" min="0" step="0.1" data-order-meta-field="weightLbs" value="${order.weightLbs}"></label>
-          <label class="field"><span>Length (in)</span><input type="number" min="0" step="0.1" data-order-meta-field="lengthIn" value="${order.lengthIn}"></label>
-          <label class="field"><span>Width (in)</span><input type="number" min="0" step="0.1" data-order-meta-field="widthIn" value="${order.widthIn}"></label>
-          <label class="field"><span>Height (in)</span><input type="number" min="0" step="0.1" data-order-meta-field="heightIn" value="${order.heightIn}"></label>
+          <label class="field"><span>Weight (lbs)</span><input type="number" min="0" step="0.1" data-order-meta-field="weightLbs" value="${order.weightLbs}" ${locked}></label>
+          <label class="field"><span>Length (in)</span><input type="number" min="0" step="0.1" data-order-meta-field="lengthIn" value="${order.lengthIn}" ${locked}></label>
+          <label class="field"><span>Width (in)</span><input type="number" min="0" step="0.1" data-order-meta-field="widthIn" value="${order.widthIn}" ${locked}></label>
+          <label class="field"><span>Height (in)</span><input type="number" min="0" step="0.1" data-order-meta-field="heightIn" value="${order.heightIn}" ${locked}></label>
         </div>
-        <div class="order-lines"><div class="order-line order-line--header"><span>Part</span><span>Description</span><span>UOM</span><span>Ordered</span><span>Shipped</span><span>B/O</span><span>Unit Price</span><span>Discount</span><span>Tax</span><span>Extended</span><span></span></div>
+        <div class="order-lines ${order.lines.length ? "" : "is-empty"}">${order.lines.length ? '<div class="order-line order-line--header"><span>Part</span><span>Description</span><span>UOM</span><span>Ordered</span><span>Avail.</span><span>Reserved</span><span>To Ship</span><span>Shipped</span><span>To Inv.</span><span>Invoiced</span><span>B/O</span><span>Unit Price</span><span>Discount</span><span>Tax</span><span>Extended</span><span></span></div>' : ""}
           <div id="orderLineRows">${renderOrderLines(order)}</div>
-          <button class="secondary-button" type="button" data-order-add-line>Add Blank Line</button>
+          ${editable ? '<button class="secondary-button" type="button" data-order-add-line>Add Blank Line</button>' : ""}
         </div>
-        <label class="field quote-notes"><span>Internal demo notes</span><textarea data-order-meta-field="notes" rows="4">${escapeHTML(order.notes)}</textarea></label>
+        <label class="field quote-notes"><span>Internal notes</span><textarea data-order-meta-field="notes" rows="4" ${order.status === "Closed" ? "disabled" : ""}>${escapeHTML(order.notes)}</textarea></label>
       </section>
       <aside class="quote-summary"><h3>Order Summary</h3>
         <div class="summary-row"><span>Subtotal</span><strong id="orderSubtotal">${formatCurrency(totals.subtotal)}</strong></div>
-        <label class="summary-input"><span>Misc</span><input type="number" min="0" step="0.01" data-order-meta-field="misc" value="${order.misc}"></label>
-        <label class="summary-input"><span>Freight</span><input type="number" min="0" step="0.01" data-order-meta-field="freight" value="${order.freight}"></label>
+        <label class="summary-input"><span>Misc</span><input type="number" min="0" step="0.01" data-order-meta-field="misc" value="${order.misc}" ${summaryLocked}></label>
+        <label class="summary-input"><span>Freight</span><input type="number" min="0" step="0.01" data-order-meta-field="freight" value="${order.freight}" ${summaryLocked}></label>
         <div class="shipping-rate-actions">
-          <select id="orderRateCarrier"><option value="UPS">UPS</option><option value="FEDEX">FedEx</option></select>
-          <button type="button" class="small-button" data-order-get-rate>Get Rate</button>
+          <select id="orderRateCarrier" ${editable ? "" : "disabled"}><option value="UPS">UPS</option><option value="FEDEX">FedEx</option></select>
+          <button type="button" class="small-button" data-order-get-rate ${editable && rateReadiness.ready ? "" : "disabled"}>Get Rate</button>
         </div>
-        <p id="orderRateStatus" class="shipping-rate-status"></p>
-        <label class="summary-input"><span>Trade Discount</span><input type="number" min="0" step="0.01" data-order-meta-field="tradeDiscount" value="${order.tradeDiscount}"></label>
+        <p id="orderRateStatus" class="shipping-rate-status">${editable && !rateReadiness.ready ? `Rate needs ${escapeHTML(rateReadiness.missing.join(", "))}.` : ""}</p>
+        <label class="summary-input"><span>Trade Discount</span><input type="number" min="0" step="0.01" data-order-meta-field="tradeDiscount" value="${order.tradeDiscount}" ${summaryLocked}></label>
         <div class="summary-row"><span>Tax</span><span class="quote-tax-note">Calculated by GP</span></div>
         <div class="summary-row total"><span>Total</span><strong id="orderTotal">${formatCurrency(totals.total)}</strong></div>
         <p class="quote-state">${isPublicDemo ? "Portfolio sandbox: edits stay only in this browser." : "Every edit here saves and is visible to the whole team."}</p>
       </aside>
-    </div>`;
-  renderOrderSearchResults();
+    </div>
+    <section class="order-timeline"><h3>Order Activity</h3>${timeline}</section>`;
+  if (editable) renderOrderSearchResults();
 }
 
 function renderQuoteSearchResults() {
@@ -3300,6 +3516,7 @@ elements.orderModalBody.addEventListener("input", (event) => {
   if (!order) return;
   if (target.matches("[data-order-meta-field]")) {
     const field = target.dataset.orderMetaField;
+    if (order.status !== "Open" && field !== "notes") return;
     order[field] = target.type === "number" ? Number(target.value) : target.value;
     touchOrder(order);
     if (field === "customerId") elements.orderModalTitle.textContent = `${order.orderNumber || "New Order"} — ${orderCompanyName(order)}`;
@@ -3309,8 +3526,33 @@ elements.orderModalBody.addEventListener("input", (event) => {
     const row = target.closest("[data-line-index]");
     const line = order.lines[Number(row.dataset.lineIndex)];
     const field = target.dataset.lineField;
-    line[field] = target.type === "checkbox" ? target.checked : target.type === "number" ? Number(target.value) : target.value;
+    if (field === "qtyToShip") {
+      if (order.status !== "Released") return;
+      line.qtyToShip = Math.min(Math.max(0, Math.floor(Number(target.value) || 0)), Number(line.reservedQty || 0), orderRemainingQty(line));
+      target.value = line.qtyToShip;
+    } else if (field === "qtyToInvoice") {
+      if (order.status !== "Released") return;
+      line.qtyToInvoice = Math.min(Math.max(0, Math.floor(Number(target.value) || 0)), Math.max(0, Number(line.shippedQty || 0) - Number(line.invoicedQty || 0)));
+      target.value = line.qtyToInvoice;
+    } else {
+      if (order.status !== "Open") return;
+      line[field] = target.type === "checkbox" ? target.checked : target.type === "number" ? Number(target.value) : target.value;
+    }
     if (field === "part") line.itemId = itemIdForPart(line.part);
+    if (field === "part") {
+      const stock = getStock(line.part);
+      line.backorderQty = Math.max(0, Number(line.quantity || 0) - Math.max(0, Number(stock.onHand) - Number(stock.allocated)));
+    }
+    touchOrder(order);
+    updateOrderNumbers();
+  }
+  if (target.matches("[data-line-field]") && target.dataset.lineField === "quantity") {
+    if (order.status !== "Open") return;
+    const row = target.closest("[data-line-index]");
+    const line = order.lines[Number(row.dataset.lineIndex)];
+    line.quantity = clampQuantity(target.value);
+    const stock = getStock(line.part);
+    line.backorderQty = Math.max(0, line.quantity - Math.max(0, Number(stock.onHand) - Number(stock.allocated)));
     touchOrder(order);
     updateOrderNumbers();
   }
@@ -3320,32 +3562,47 @@ elements.orderModalBody.addEventListener("change", (event) => {
   const order = activeOrder();
   if (!order) return;
   if (target.matches("[data-order-meta-field]") && target.tagName === "SELECT") {
+    if (order.status !== "Open") return;
     order[target.dataset.orderMetaField] = target.value;
     touchOrder(order);
-    if (target.dataset.orderMetaField === "status") renderOrdersWorkspace();
+    if (target.dataset.orderMetaField === "customerId") renderOrderModal();
   }
   if (target.matches("[data-line-field]") && target.dataset.lineField === "quantity") {
+    if (order.status !== "Open") return;
     const row = target.closest("[data-line-index]");
     const line = order.lines[Number(row.dataset.lineIndex)];
-    const requestedQty = clampQuantity(target.value);
-    applyLineQuantity(line, requestedQty, (accepted) => {
-      if (!accepted) { target.value = line.quantity; return; }
-      touchOrder(order);
-      renderOrderModal();
-    });
+    line.quantity = clampQuantity(target.value);
+    const stock = getStock(line.part);
+    line.backorderQty = Math.max(0, line.quantity - Math.max(0, Number(stock.onHand) - Number(stock.allocated)));
+    touchOrder(order);
+    renderOrderModal();
   }
 });
 elements.orderModalBody.addEventListener("click", (event) => {
+  const order = activeOrder();
+  if (!order) return;
+  if (event.target.closest("[data-order-release]")) { requireIdentity(() => releaseOrder(order)); return; }
+  if (event.target.closest("[data-order-reopen]")) { requireIdentity(() => reopenOrder(order)); return; }
+  if (event.target.closest("[data-order-reserve]")) {
+    requireIdentity(() => {
+      const reserved = reserveAvailableForOrder(order);
+      touchOrder(order);
+      renderOrderModal();
+      showToast(reserved ? `${reserved} more unit${reserved === 1 ? "" : "s"} reserved` : "No additional inventory is available yet");
+    });
+    return;
+  }
+  if (event.target.closest("[data-order-post-shipment]")) { requireIdentity(() => postOrderShipment(order)); return; }
+  if (event.target.closest("[data-order-post-invoice]")) { requireIdentity(() => postOrderInvoice(order)); return; }
   if (event.target.closest("[data-order-add-line]")) {
-    const order = activeOrder();
-    if (!order) return;
-    order.lines.push({ part: "", description: "", uom: "EA", quantity: 1, shippedQty: 1, backorderQty: 0, unitPrice: 0, discount: 0, taxable: false, source: "Manual" });
+    if (order.status !== "Open") return;
+    order.lines.push({ part: "", description: "", uom: "EA", quantity: 1, reservedQty: 0, qtyToShip: 0, shippedQty: 0, qtyToInvoice: 0, invoicedQty: 0, backorderQty: 0, unitPrice: 0, discount: 0, taxable: false, source: "Manual" });
     touchOrder(order);
     renderOrderModal();
     return;
   }
   const remove = event.target.closest("[data-line-remove]");
-  if (remove) { const order = activeOrder(); if (!order) return; order.lines.splice(Number(remove.dataset.lineRemove), 1); touchOrder(order); renderOrderModal(); return; }
+  if (remove) { if (order.status !== "Open") return; order.lines.splice(Number(remove.dataset.lineRemove), 1); touchOrder(order); renderOrderModal(); return; }
   const searchAdd = event.target.closest("[data-order-search-add-part]");
   if (searchAdd) { addOrderLine(searchAdd.dataset.orderSearchAddPart, searchAdd.dataset.orderSearchAddDescription, 0, "MDB demo", searchAdd.dataset.orderSearchAddCategory); return; }
   if (event.target.closest("[data-order-get-rate]")) { fetchShippingRate(); return; }
