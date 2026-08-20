@@ -132,6 +132,10 @@ const elements = {
   orderModalClose: $("#orderModalClose"),
   orderModalTitle: $("#orderModalTitle"),
   orderModalBody: $("#orderModalBody"),
+  buildModal: $("#buildModal"),
+  buildModalClose: $("#buildModalClose"),
+  buildModalTitle: $("#buildModalTitle"),
+  buildModalBody: $("#buildModalBody"),
   backorderModal: $("#backorderModal"),
   backorderModalBody: $("#backorderModalBody"),
 };
@@ -160,6 +164,15 @@ const state = {
   orderListOpen: { open: true, released: true, closed: false },
   orderSearchTerm: "",
   orderSearchTimer: null,
+  builds: [],
+  buildsBackendConfigured: false,
+  buildSaveTimer: null,
+  activeBuildId: "",
+  buildListOpen: { open: true, released: true, finished: false },
+  buildTargetSearchTerm: "",
+  buildTargetSearchTimer: null,
+  buildComponentSearchTerm: "",
+  buildComponentSearchTimer: null,
   rigQuoteFiles: {},
   stock: {},
   touches: {},
@@ -975,6 +988,121 @@ function touchOrder(order) {
   state.orderSaveTimer = setTimeout(() => pushOrderToBackend(order), 600);
 }
 
+function newBuild(overrides = {}) {
+  const identity = state.identity;
+  const now = new Date().toISOString();
+  const build = {
+    id: `build-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    buildNumber: "",
+    itemId: null, part: "", description: "", uom: "EA",
+    quantity: 1, builtQty: 0, dueDate: "", locationCode: "MAIN",
+    status: "Open", notes: "",
+    releasedAt: null, releasedByInitials: "", releasedByName: "", finishedAt: null,
+    components: [], events: [],
+    originatorInitials: identity?.initials || "", originatorName: identity?.name || "",
+    lastModifiedByInitials: identity?.initials || "", lastModifiedByName: identity?.name || "",
+    createdAt: now, lastModifiedAt: now,
+    ...overrides,
+  };
+  if (!build.events.length) recordBuildEvent(build, "Created", "Build order created", "Open for entry and review.");
+  return normalizeBuild(build);
+}
+
+function recordBuildEvent(build, type, summary, detail = "") {
+  const identity = state.identity || publicDemoIdentity;
+  build.events ||= [];
+  build.events.unshift({
+    key: `event-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    type, summary, detail,
+    actorInitials: identity?.initials || "",
+    actorName: identity?.name || "",
+    createdAt: new Date().toISOString(),
+  });
+}
+
+function normalizeBuild(build) {
+  build.locationCode ||= "MAIN";
+  build.events = Array.isArray(build.events) ? build.events : [];
+  build.releasedAt ||= null;
+  build.releasedByInitials ||= "";
+  build.releasedByName ||= "";
+  build.finishedAt ||= null;
+  build.quantity = Math.max(1, Number(build.quantity) || 1);
+  build.builtQty = Math.max(0, Math.min(build.quantity, Number(build.builtQty) || 0));
+  build.components = (Array.isArray(build.components) ? build.components : []).map((line) => ({
+    ...line,
+    qtyRequired: Math.max(0, Number(line.qtyRequired) || 0),
+    qtyConsumed: Math.max(0, Number(line.qtyConsumed) || 0),
+  }));
+  return build;
+}
+
+async function loadBuilds() {
+  if (isPublicDemo) {
+    state.buildsBackendConfigured = false;
+    state.builds = safeLoad("mdb-demo-builds", []).map(normalizeBuild);
+    return;
+  }
+  try {
+    const response = await fetch("/.netlify/functions/build-orders-list");
+    if (response.ok) {
+      const data = await response.json();
+      if (data.configured) {
+        // Merge rather than replace: a build order created locally in the
+        // last few hundred ms may not have finished its debounced save yet
+        // -- don't let a slow-arriving refresh wipe it out.
+        const serverIds = new Set(data.builds.map((build) => build.id));
+        const unsavedLocal = state.builds.filter((build) => !serverIds.has(build.id));
+        state.builds = [...unsavedLocal, ...data.builds].map(normalizeBuild);
+        state.buildsBackendConfigured = true;
+        saveBuilds();
+        return;
+      }
+    }
+  } catch {
+    // backend unreachable -- fall through to the local copy
+  }
+  state.buildsBackendConfigured = false;
+  state.builds = safeLoad("mdb-demo-builds", []).map(normalizeBuild);
+}
+
+function saveBuilds() {
+  safeSave("mdb-demo-builds", state.builds);
+}
+
+async function pushBuildToBackend(build) {
+  if (isPublicDemo) return;
+  try {
+    const response = await fetch("/.netlify/functions/build-orders-save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(build),
+    });
+    if (!response.ok) return;
+    const data = await response.json().catch(() => ({}));
+    state.buildsBackendConfigured = data.configured !== false;
+    if (data.buildNumber && !build.buildNumber) {
+      build.buildNumber = data.buildNumber;
+      saveBuilds();
+      if (state.activeBuildId === build.id && !elements.buildModal.hidden) renderBuildModal();
+    }
+  } catch {
+    // offline or backend unreachable -- the local copy already saved via saveBuilds()
+  }
+}
+
+function activeBuild() {
+  return state.builds.find((build) => build.id === state.activeBuildId) || null;
+}
+
+function touchBuild(build) {
+  build.lastModifiedAt = new Date().toISOString();
+  if (state.identity) { build.lastModifiedByInitials = state.identity.initials; build.lastModifiedByName = state.identity.name; }
+  saveBuilds();
+  clearTimeout(state.buildSaveTimer);
+  state.buildSaveTimer = setTimeout(() => pushBuildToBackend(build), 600);
+}
+
 let backorderResolveCallback = null;
 
 function openBackorderConfirm({ part, description, onYes, onNo }) {
@@ -1149,6 +1277,7 @@ async function loadData() {
   state.touches = safeLoad("mdb-demo-touches", {});
   await loadQuotes();
   await loadOrders();
+  await loadBuilds();
   loadRigSalesOpportunities();
   state.identity = isPublicDemo
     ? { ...publicDemoIdentity }
@@ -1537,7 +1666,7 @@ function openWorkspace(type, options = {}) {
   const customer = customers.find((item) => item.id === state.selectedCustomerId);
   elements.overlayEyebrow.textContent = type === "customerTooling" ? customer?.name || "Customer" : "MDB";
   const titles = {
-    items: "Items", tooling: "Tooling", customerTooling: "Customer Tooling", quotes: "Quote Builder", orders: "Orders", inventory: "Inventory", bom: "Rig / BOM View", rigSpecs: "Rig Specifications",
+    items: "Items", tooling: "Tooling", customerTooling: "Customer Tooling", quotes: "Quote Builder", orders: "Orders", builds: "Build Orders", inventory: "Inventory", bom: "Rig / BOM View", rigSpecs: "Rig Specifications",
     calibration: "Calibration", rigSales: "Rig Sales", prospects: "New Prospect Search", callList: "Daily Call List",
     calibrationTraining: "Calibration Training", workflowTraining: "Workflow Training",
     reports: "Sales Reports",
@@ -1555,6 +1684,7 @@ function openWorkspace(type, options = {}) {
   }
   if (type === "quotes") { renderQuoteWorkspace(); if (state.quotesBackendConfigured) loadQuotes().then(() => { if (state.activeWorkspace === "quotes") renderQuoteWorkspace(); }); }
   if (type === "orders") { renderOrdersWorkspace(); if (state.ordersBackendConfigured) loadOrders().then(() => { if (state.activeWorkspace === "orders") renderOrdersWorkspace(); }); }
+  if (type === "builds") { renderBuildsWorkspace(); if (state.buildsBackendConfigured) loadBuilds().then(() => { if (state.activeWorkspace === "builds") renderBuildsWorkspace(); }); }
   if (type === "inventory") { renderInventoryWorkspace(options.query || ""); if (state.inventoryBackendConfigured) loadInventory(); }
   if (type === "bom") renderBomWorkspace(options);
   if (type === "rigSpecs") renderRigSpecsWorkspace(options);
@@ -2291,6 +2421,80 @@ function postOrderInvoice(order) {
   showToast(complete ? "Order fully shipped, invoiced, and closed" : `${invoicedNow} unit${invoicedNow === 1 ? "" : "s"} posted to invoice`);
 }
 
+function buildRemainingQty(build) {
+  return Math.max(0, Number(build.quantity || 0) - Number(build.builtQty || 0));
+}
+
+function buildReadiness(build) {
+  const missing = [];
+  if (!build.part) missing.push("what to build");
+  if (!(Number(build.quantity) > 0)) missing.push("a quantity");
+  return { missing, canRelease: build.status === "Open" && missing.length === 0 };
+}
+
+function releaseBuild(build) {
+  const readiness = buildReadiness(build);
+  if (!readiness.canRelease) { showToast(`Can't release yet — add ${readiness.missing.join(" and ")}.`); return; }
+  build.status = "Released";
+  build.releasedAt = new Date().toISOString();
+  build.releasedByInitials = state.identity?.initials || publicDemoIdentity.initials;
+  build.releasedByName = state.identity?.name || publicDemoIdentity.name;
+  recordBuildEvent(build, "Released", "Build order released", "Shop can begin pulling components and building.");
+  touchBuild(build);
+  renderBuildModal();
+  showToast("Build order released to the shop");
+}
+
+function reopenBuild(build) {
+  if (build.status !== "Released") return;
+  if (Number(build.builtQty) > 0 || build.components.some((line) => Number(line.qtyConsumed) > 0)) {
+    showToast("Can't reopen — components have already been consumed against this build.");
+    return;
+  }
+  build.status = "Open";
+  build.releasedAt = null;
+  build.releasedByInitials = "";
+  build.releasedByName = "";
+  recordBuildEvent(build, "Reopened", "Build order reopened", "Nothing had been consumed or built yet.");
+  touchBuild(build);
+  renderBuildModal();
+  showToast("Build order reopened for editing");
+}
+
+function postBuild(build) {
+  if (build.status !== "Released") return;
+  let consumedNow = 0;
+  build.components.forEach((line) => {
+    const consume = Math.max(0, Math.min(Number(line.qtyToConsume) || 0, line.qtyRequired - line.qtyConsumed));
+    if (consume > 0 && line.part) {
+      const stock = getStock(line.part);
+      stock.onHand = Math.max(0, Number(stock.onHand) - consume);
+      line.qtyConsumed += consume;
+      consumedNow += consume;
+    }
+    line.qtyToConsume = 0;
+  });
+  const finishNow = Math.max(0, Math.min(Number(build.qtyToFinish) || 0, buildRemainingQty(build)));
+  if (finishNow > 0 && build.part) {
+    const stock = getStock(build.part);
+    stock.onHand = Number(stock.onHand) + finishNow;
+    build.builtQty += finishNow;
+  }
+  build.qtyToFinish = 0;
+  if (!consumedNow && !finishNow) { showToast("Enter a quantity to consume or finish first"); return; }
+  saveStock();
+  if (consumedNow) recordBuildEvent(build, "Consumed", "Components consumed", `${consumedNow} unit${consumedNow === 1 ? "" : "s"} pulled from inventory.`);
+  if (finishNow) recordBuildEvent(build, "Finished", "Build progress posted", `${finishNow} ${build.uom || "EA"} of ${build.part} completed.`);
+  if (build.builtQty >= build.quantity) {
+    build.status = "Finished";
+    build.finishedAt = new Date().toISOString();
+    recordBuildEvent(build, "Finished", "Build order finished", "Full build quantity completed.");
+  }
+  touchBuild(build);
+  renderBuildModal();
+  showToast(build.status === "Finished" ? "Build order finished" : "Build progress posted");
+}
+
 async function fetchShippingRate() {
   const order = activeOrder();
   if (!order) return;
@@ -2352,6 +2556,177 @@ function renderOrdersWorkspace() {
     ${renderOrderListSection("Released to Warehouse", releasedOrders, "released")}
     ${renderOrderListSection("Closed Orders", closedOrders, "closed")}
   </div>`;
+}
+
+function sortedBuildsByStatus(status) {
+  return state.builds.filter((build) => build.status === status).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+function renderBuildListSection(title, builds, sectionKey) {
+  const open = state.buildListOpen[sectionKey];
+  return `<section class="quote-list-section">
+    <button type="button" class="quote-list-toggle" data-build-list-toggle="${sectionKey}">
+      <span>${escapeHTML(title)} (${builds.length})</span><span class="quote-list-caret">${open ? "▾" : "▸"}</span>
+    </button>
+    ${open ? (builds.length
+      ? `<div class="quote-list-rows">${builds.map((build) => `<button type="button" class="quote-list-row order-list-row" data-build-open="${build.id}"><span><strong>${escapeHTML(build.part || "No item selected")}</strong><small>${escapeHTML(build.buildNumber || "Pending #")} · ${escapeHTML(build.description || "")}</small></span><span><b class="order-status-pill is-${build.status === "Finished" ? "closed" : build.status.toLowerCase()}">${escapeHTML(build.status)}</b><small>${build.builtQty}/${build.quantity} built</small></span></button>`).join("")}</div>`
+      : `<p class="quote-list-empty">No ${escapeHTML(title.toLowerCase())}.</p>`) : ""}
+  </section>`;
+}
+
+function renderBuildsWorkspace() {
+  const openBuilds = sortedBuildsByStatus("Open");
+  const releasedBuilds = sortedBuildsByStatus("Released");
+  const finishedBuilds = sortedBuildsByStatus("Finished");
+  const inProgress = releasedBuilds.filter((build) => Number(build.builtQty) > 0).length;
+  elements.overlayBody.innerHTML = `<div class="workbench quotes-workbench">
+    <div class="operations-toolbar"><div><strong>Build Orders</strong><span>${isPublicDemo ? "Portfolio sandbox — changes stay on this device and are never sent to GP." : state.buildsBackendConfigured ? "Synced live across the team — not sent to GP." : "Browser-local only right now — not yet synced across devices, not sent to GP."}</span></div><button type="button" class="primary-button" data-build-new>Start New Build Order</button></div>
+    <div class="order-metric-grid">
+      <div><span>Open entry</span><strong>${openBuilds.length}</strong></div>
+      <div><span>Released</span><strong>${releasedBuilds.length}</strong></div>
+      <div><span>In progress</span><strong>${inProgress}</strong></div>
+      <div><span>Finished</span><strong>${finishedBuilds.length}</strong></div>
+    </div>
+    ${renderBuildListSection("Open for Entry", openBuilds, "open")}
+    ${renderBuildListSection("Released to Shop", releasedBuilds, "released")}
+    ${renderBuildListSection("Finished Builds", finishedBuilds, "finished")}
+  </div>`;
+}
+
+function openBuildModal(buildId) {
+  state.activeBuildId = buildId;
+  state.buildTargetSearchTerm = "";
+  state.buildComponentSearchTerm = "";
+  renderBuildModal();
+  elements.buildModal.hidden = false;
+}
+
+function closeBuildModal() {
+  elements.buildModal.hidden = true;
+  state.activeBuildId = "";
+  if (state.activeWorkspace === "builds") renderBuildsWorkspace();
+}
+
+function buildableItemMatches(term) {
+  return state.items
+    .map((item) => ({ ...item, score: matchScore(term, `${item.partNumber} ${item.description}`) }))
+    .filter((item) => item.score >= 0.5 && item.partNumber)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8);
+}
+
+function renderBuildTargetSearchResults() {
+  const host = $("#buildTargetSearchResults");
+  if (!host) return;
+  const term = state.buildTargetSearchTerm.trim();
+  if (!term) { host.innerHTML = ""; return; }
+  const results = buildableItemMatches(term);
+  host.innerHTML = results.length
+    ? results.map((item) => `<button type="button" class="advanced-search-result" data-build-target-select-part="${escapeHTML(item.partNumber)}" data-build-target-select-description="${escapeHTML(item.description || "")}" data-build-target-select-uom="${escapeHTML(item.uom || "EA")}"><strong>${escapeHTML(item.partNumber)}</strong><span>${escapeHTML(item.description || "")} · ${escapeHTML(item.itemClass || "Item")}</span></button>`).join("")
+    : '<p class="advanced-search-empty">No matches in the Item Master.</p>';
+}
+
+function renderBuildComponentSearchResults() {
+  const host = $("#buildComponentSearchResults");
+  if (!host) return;
+  const term = state.buildComponentSearchTerm.trim();
+  if (!term) { host.innerHTML = ""; return; }
+  const results = buildableItemMatches(term);
+  host.innerHTML = results.length
+    ? results.map((item) => `<button type="button" class="advanced-search-result" data-build-component-add-part="${escapeHTML(item.partNumber)}" data-build-component-add-description="${escapeHTML(item.description || "")}" data-build-component-add-uom="${escapeHTML(item.uom || "EA")}"><strong>${escapeHTML(item.partNumber)}</strong><span>${escapeHTML(item.description || "")} · ${escapeHTML(item.itemClass || "Item")}</span></button>`).join("")
+    : '<p class="advanced-search-empty">No matches in the Item Master.</p>';
+}
+
+function setBuildTarget(part, description, uom) {
+  const build = activeBuild();
+  if (!build) return;
+  if (build.status !== "Open") { showToast("Reopen the build order to change what's being built"); return; }
+  build.part = part || "";
+  build.description = description || "";
+  build.uom = uom || "EA";
+  build.itemId = itemIdForPart(part);
+  state.buildTargetSearchTerm = "";
+  touchBuild(build);
+  renderBuildModal();
+}
+
+function addBuildComponent(part, description, uom) {
+  const build = activeBuild();
+  if (!build) return;
+  if (build.status === "Finished") { showToast("This build order is already finished"); return; }
+  build.components.push({ itemId: itemIdForPart(part), part: part || "", description: description || "", uom: uom || "EA", qtyRequired: 1, qtyConsumed: 0, qtyToConsume: 0 });
+  touchBuild(build);
+  showToast(`${part || "Component"} added`);
+  renderBuildModal();
+}
+
+function renderBuildComponents(build) {
+  if (!build.components.length) return '<div class="quote-empty">No components yet. Search above to add raw stock or sub-parts.</div>';
+  const entryLocked = build.status !== "Open" ? "disabled" : "";
+  const consumeLocked = build.status !== "Released" ? "disabled" : "";
+  return build.components.map((line, index) => `<div class="build-line" data-line-index="${index}">
+      <input class="line-input" data-line-field="part" value="${escapeHTML(line.part)}" aria-label="Component part number" ${entryLocked}>
+      <input class="line-input line-description" data-line-field="description" value="${escapeHTML(line.description)}" aria-label="Description" ${entryLocked}>
+      <input class="line-input line-uom" data-line-field="uom" value="${escapeHTML(line.uom || "EA")}" aria-label="Unit of measure" ${entryLocked}>
+      <input class="line-input" type="number" min="0" step="1" data-line-field="qtyRequired" value="${line.qtyRequired}" aria-label="Quantity required" ${entryLocked}>
+      <span class="order-line-readout">${line.qtyConsumed}</span>
+      <input class="line-input" type="number" min="0" max="${line.qtyRequired - line.qtyConsumed}" step="1" data-line-field="qtyToConsume" value="${line.qtyToConsume || 0}" aria-label="Quantity to consume" ${consumeLocked}>
+      ${build.status === "Open" ? `<button class="line-remove" type="button" data-line-remove="${index}" aria-label="Remove component">×</button>` : "<span></span>"}
+    </div>`).join("");
+}
+
+function renderBuildModal() {
+  const build = activeBuild();
+  if (!build) return;
+  const readiness = buildReadiness(build);
+  const editable = build.status === "Open";
+  const locked = editable ? "" : "disabled";
+  const remaining = buildRemainingQty(build);
+  const actionButtons = build.status === "Open"
+    ? `<button type="button" class="primary-button" data-build-release ${readiness.canRelease ? "" : "disabled"}>Release to Shop</button>`
+    : build.status === "Released"
+      ? `<button type="button" class="secondary-button" data-build-reopen>Reopen</button><button type="button" class="primary-button" data-build-post>Post Build Progress</button>`
+      : '<span class="order-closed-message">Build quantity fully completed.</span>';
+  const timeline = build.events.length ? build.events.map((event) => `<div class="order-event"><span class="order-event-dot"></span><div><strong>${escapeHTML(event.summary)}</strong><span>${escapeHTML(event.detail || "")}</span><small>${new Date(event.createdAt).toLocaleString()}${event.actorName ? ` · ${escapeHTML(event.actorName)}` : ""}</small></div></div>`).join("") : '<p class="quote-list-empty">No activity recorded yet.</p>';
+  elements.buildModalTitle.textContent = `${build.buildNumber || "New Build Order"} — ${build.part || "No item selected"}`;
+  elements.buildModalBody.innerHTML = `<div class="quote-context"><div><span>Build Order</span><strong>${escapeHTML(build.part || "No item selected")}</strong>${build.description ? `<small>${escapeHTML(build.description)}</small>` : ""}</div>
+      <span class="order-status-pill is-${build.status === "Finished" ? "closed" : build.status.toLowerCase()}">${escapeHTML(build.status)}</span>
+    </div>
+    <p class="quote-attribution">Originated by ${escapeHTML(build.originatorName || "Unknown")}${build.originatorInitials ? ` (${escapeHTML(build.originatorInitials)})` : ""} · Last edited by ${escapeHTML(build.lastModifiedByName || "Unknown")} ${build.lastModifiedAt ? new Date(build.lastModifiedAt).toLocaleString() : ""}</p>
+    <div class="order-action-bar">${actionButtons}</div>
+    <div class="order-readiness ${readiness.missing.length ? "has-warning" : "is-ready"}"><strong>${readiness.missing.length ? "Before release" : build.status === "Open" ? "Ready to release" : "Build status"}</strong><span>${readiness.missing.length ? `Add ${escapeHTML(readiness.missing.join(", "))}.` : `${build.builtQty}/${build.quantity} ${escapeHTML(build.uom || "EA")} built${remaining ? ` · ${remaining} remaining` : " · complete"}`}</span></div>
+    ${editable ? `<div class="quote-search-wrap">
+      <label class="field"><span>Search the Item Master for what to build</span><input type="text" id="buildTargetSearchInput" autocomplete="off" spellcheck="false" placeholder="Part number or description..." value="${escapeHTML(state.buildTargetSearchTerm)}"></label>
+      <div id="buildTargetSearchResults" class="quote-search-results"></div>
+    </div>` : ""}
+    <div class="quote-layout">
+      <section class="quote-form">
+        <div class="quote-fields">
+          <label class="field"><span>Quantity to build</span><input type="number" min="1" max="5000" step="1" data-build-meta-field="quantity" value="${build.quantity}" ${locked}></label>
+          <label class="field"><span>Due Date</span><input type="date" data-build-meta-field="dueDate" value="${escapeHTML(build.dueDate || "")}" ${locked}></label>
+          <label class="field"><span>Location</span><input data-build-meta-field="locationCode" value="${escapeHTML(build.locationCode || "MAIN")}" ${locked}></label>
+        </div>
+        <div class="order-lines ${build.components.length ? "" : "is-empty"}">
+          <h3>Components</h3>
+          ${build.status !== "Finished" ? `<div class="quote-search-wrap">
+            <label class="field"><span>Search the Item Master for raw stock or sub-parts</span><input type="text" id="buildComponentSearchInput" autocomplete="off" spellcheck="false" placeholder="Part number or description..." value="${escapeHTML(state.buildComponentSearchTerm)}"></label>
+            <div id="buildComponentSearchResults" class="quote-search-results"></div>
+          </div>` : ""}
+          ${build.components.length ? '<div class="build-line build-line--header"><span>Part</span><span>Description</span><span>UOM</span><span>Required</span><span>Consumed</span><span>To Consume</span><span></span></div>' : ""}
+          <div id="buildComponentRows">${renderBuildComponents(build)}</div>
+        </div>
+        <label class="field quote-notes"><span>Shop notes</span><textarea data-build-meta-field="notes" rows="4" ${build.status === "Finished" ? "disabled" : ""}>${escapeHTML(build.notes)}</textarea></label>
+      </section>
+      <aside class="quote-summary"><h3>Progress</h3>
+        <div class="summary-row"><span>Target quantity</span><strong>${build.quantity} ${escapeHTML(build.uom || "EA")}</strong></div>
+        <div class="summary-row"><span>Built so far</span><strong>${build.builtQty} ${escapeHTML(build.uom || "EA")}</strong></div>
+        ${build.status === "Released" ? `<label class="summary-input"><span>Qty to finish this pass</span><input type="number" min="0" max="${remaining}" step="1" data-build-meta-field="qtyToFinish" value="${build.qtyToFinish || 0}"></label>` : ""}
+        <p class="quote-state">${isPublicDemo ? "Portfolio sandbox: edits stay only in this browser." : "Every edit here saves and is visible to the whole team."}</p>
+      </aside>
+    </div>
+    <section class="order-timeline"><h3>Build Activity</h3>${timeline}</section>`;
+  if (editable) renderBuildTargetSearchResults();
+  if (build.status !== "Finished") renderBuildComponentSearchResults();
 }
 
 function reportsChangeLabel(current, previous) {
@@ -2716,13 +3091,14 @@ function renderBomTree() {
     <div class="bom-tree">${roots.map((assembly) => renderBomNode(assembly.part, assembly.description, children, new Set(), 0)).join("")}</div>`;
 }
 
-function renderBomNode(part, description, children, visited, depth) {
+function renderBomNode(part, description, children, visited, depth, quantity, uom) {
   const rows = children.get(part) || [];
-  if (visited.has(part) || depth > 8) return `<button type="button" class="bom-leaf" data-bom-part="${escapeHTML(part)}"><strong>${escapeHTML(part)}</strong><span>${escapeHTML(description)}</span></button>`;
+  const qtyLabel = quantity != null ? `<small>${escapeHTML(quantity)} ${escapeHTML(uom || "")}</small>` : "";
+  if (visited.has(part) || depth > 8) return `<button type="button" class="bom-leaf" data-bom-part="${escapeHTML(part)}"><strong>${escapeHTML(part)}</strong><span>${escapeHTML(description)}</span>${qtyLabel}</button>`;
   const nextVisited = new Set(visited); nextVisited.add(part);
-  return `<details class="bom-node" ${depth === 0 ? "open" : ""}><summary><button type="button" data-bom-part="${escapeHTML(part)}"><strong>${escapeHTML(part)}</strong><span>${escapeHTML(description)}</span></button><small>${rows.length} items</small></summary>
+  return `<details class="bom-node" ${depth === 0 ? "open" : ""}><summary><button type="button" data-bom-part="${escapeHTML(part)}"><strong>${escapeHTML(part)}</strong><span>${escapeHTML(description)}</span>${qtyLabel}</button><small>${rows.length} items</small></summary>
     <div class="bom-children">${rows.map((row) => children.has(row.part)
-      ? renderBomNode(row.part, row.description, children, nextVisited, depth + 1)
+      ? renderBomNode(row.part, row.description, children, nextVisited, depth + 1, row.quantity, row.uom)
       : `<button type="button" class="bom-leaf" data-bom-part="${escapeHTML(row.part)}"><strong>${escapeHTML(row.part)}</strong><span>${escapeHTML(row.description)}</span><small>${escapeHTML(row.quantity)} ${escapeHTML(row.uom)}</small></button>`).join("")}</div></details>`;
 }
 
@@ -3415,7 +3791,21 @@ elements.overlayBody.addEventListener("click", (event) => {
   const orderListToggle = event.target.closest("[data-order-list-toggle]");
   if (orderListToggle) { const key = orderListToggle.dataset.orderListToggle; state.orderListOpen[key] = !state.orderListOpen[key]; renderOrdersWorkspace(); return; }
   const orderOpen = event.target.closest("[data-order-open]");
-  if (orderOpen) { openOrderModal(orderOpen.dataset.orderOpen); }
+  if (orderOpen) { openOrderModal(orderOpen.dataset.orderOpen); return; }
+  if (event.target.closest("[data-build-new]")) {
+    requireIdentity(() => {
+      const build = newBuild();
+      state.builds.unshift(build);
+      touchBuild(build);
+      renderBuildsWorkspace();
+      openBuildModal(build.id);
+    });
+    return;
+  }
+  const buildListToggle = event.target.closest("[data-build-list-toggle]");
+  if (buildListToggle) { const key = buildListToggle.dataset.buildListToggle; state.buildListOpen[key] = !state.buildListOpen[key]; renderBuildsWorkspace(); return; }
+  const buildOpen = event.target.closest("[data-build-open]");
+  if (buildOpen) { openBuildModal(buildOpen.dataset.buildOpen); }
 });
 
 elements.homeButton.addEventListener("click", showHome);
@@ -3606,6 +3996,71 @@ elements.orderModalBody.addEventListener("click", (event) => {
   const searchAdd = event.target.closest("[data-order-search-add-part]");
   if (searchAdd) { addOrderLine(searchAdd.dataset.orderSearchAddPart, searchAdd.dataset.orderSearchAddDescription, 0, "MDB demo", searchAdd.dataset.orderSearchAddCategory); return; }
   if (event.target.closest("[data-order-get-rate]")) { fetchShippingRate(); return; }
+});
+
+elements.buildModalClose.addEventListener("click", closeBuildModal);
+elements.buildModal.addEventListener("click", (event) => {
+  if (event.target === elements.buildModal) closeBuildModal();
+});
+elements.buildModalBody.addEventListener("input", (event) => {
+  const target = event.target;
+  if (target.id === "buildTargetSearchInput") {
+    state.buildTargetSearchTerm = target.value;
+    clearTimeout(state.buildTargetSearchTimer);
+    state.buildTargetSearchTimer = setTimeout(renderBuildTargetSearchResults, 90);
+    return;
+  }
+  if (target.id === "buildComponentSearchInput") {
+    state.buildComponentSearchTerm = target.value;
+    clearTimeout(state.buildComponentSearchTimer);
+    state.buildComponentSearchTimer = setTimeout(renderBuildComponentSearchResults, 90);
+    return;
+  }
+  const build = activeBuild();
+  if (!build) return;
+  if (target.matches("[data-build-meta-field]")) {
+    const field = target.dataset.buildMetaField;
+    if (field === "qtyToFinish") {
+      if (build.status !== "Released") return;
+      build.qtyToFinish = Math.min(Math.max(0, Math.floor(Number(target.value) || 0)), buildRemainingQty(build));
+      target.value = build.qtyToFinish;
+      touchBuild(build);
+      return;
+    }
+    if (build.status !== "Open" && field !== "notes") return;
+    build[field] = field === "quantity" ? clampQuantity(target.value) : target.value;
+    if (field === "quantity" && String(target.value) !== String(build.quantity)) target.value = build.quantity;
+    touchBuild(build);
+    return;
+  }
+  if (target.matches("[data-line-field]")) {
+    const row = target.closest("[data-line-index]");
+    const line = build.components[Number(row.dataset.lineIndex)];
+    const field = target.dataset.lineField;
+    if (field === "qtyToConsume") {
+      if (build.status !== "Released") return;
+      line.qtyToConsume = Math.min(Math.max(0, Math.floor(Number(target.value) || 0)), line.qtyRequired - line.qtyConsumed);
+      target.value = line.qtyToConsume;
+    } else {
+      if (build.status !== "Open") return;
+      line[field] = field === "qtyRequired" ? Math.max(0, Number(target.value) || 0) : target.value;
+      if (field === "part") line.itemId = itemIdForPart(line.part);
+    }
+    touchBuild(build);
+  }
+});
+elements.buildModalBody.addEventListener("click", (event) => {
+  const build = activeBuild();
+  if (!build) return;
+  if (event.target.closest("[data-build-release]")) { requireIdentity(() => releaseBuild(build)); return; }
+  if (event.target.closest("[data-build-reopen]")) { requireIdentity(() => reopenBuild(build)); return; }
+  if (event.target.closest("[data-build-post]")) { requireIdentity(() => postBuild(build)); return; }
+  const remove = event.target.closest("[data-line-remove]");
+  if (remove) { if (build.status !== "Open") return; build.components.splice(Number(remove.dataset.lineRemove), 1); touchBuild(build); renderBuildModal(); return; }
+  const targetSelect = event.target.closest("[data-build-target-select-part]");
+  if (targetSelect) { setBuildTarget(targetSelect.dataset.buildTargetSelectPart, targetSelect.dataset.buildTargetSelectDescription, targetSelect.dataset.buildTargetSelectUom); return; }
+  const componentAdd = event.target.closest("[data-build-component-add-part]");
+  if (componentAdd) { addBuildComponent(componentAdd.dataset.buildComponentAddPart, componentAdd.dataset.buildComponentAddDescription, componentAdd.dataset.buildComponentAddUom); return; }
 });
 
 elements.advancedSearchButton.addEventListener("click", openAdvancedSearch);

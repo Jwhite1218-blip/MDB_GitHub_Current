@@ -1973,6 +1973,28 @@ button:disabled {
   font-weight: 750;
 }
 
+.build-line {
+  display: grid;
+  grid-template-columns: 110px minmax(150px, 1fr) 60px 90px 90px 100px 36px;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 7px;
+  min-width: 720px;
+}
+
+.build-line--header {
+  margin-bottom: 7px;
+  color: var(--ink-faint);
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.build-line--header span:nth-child(n + 3) {
+  text-align: center;
+}
+
 .order-line input:disabled,
 .quote-form input:disabled,
 .quote-form select:disabled,
