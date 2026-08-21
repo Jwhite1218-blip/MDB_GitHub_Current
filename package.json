@@ -1,0 +1,16 @@
+{
+  "name": "mobile-drill-brain",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Mobile Drill Brain operational portal and production-control foundation",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check:contracts": "node --check netlify/functions/_production-control.js"
+  },
+  "dependencies": {
+    "@netlify/identity": "2.0.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.5"
+  }
+}

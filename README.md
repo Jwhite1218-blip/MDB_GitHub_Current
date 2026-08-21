@@ -109,6 +109,41 @@ MDB uses one canonical Item record per normalized part number for shared operati
 
 ## Demo scope
 
+## Production Control foundation
+
+The unified Sales + Operations workflow is defined in
+`docs/architecture/PRODUCTION_CONTROL_FOUNDATION.md`. Its additive database
+foundation is implemented by
+`supabase/migrations/20260821143000_production_control_foundation.sql`.
+
+The standalone Operations portfolio audit and its disposition into this
+canonical project are recorded in
+`docs/architecture/OPERATIONS_PORTFOLIO_MERGE.md`. The unified demo now exposes
+Sales Build Requests, the Production Control gatekeeper inbox, controlled Build
+Orders, a Shop Floor execution view, and read-only production tracking for the
+originating Sales representative. The historical portfolio is a frozen
+comparison artifact rather than a second development track.
+
+The operational path requires Netlify Identity with invite-only registration.
+An authenticated Identity account must also be provisioned in
+`operational_users` and assigned server-controlled roles in
+`operational_user_roles`. The browser identity picker remains demo attribution
+only and is never authorization evidence.
+
+The new `production-control` Netlify Function owns Build Request creation,
+gatekeeper transitions, controlled Build Order preparation, release, assignment,
+exceptions, and idempotent consumption/output posting. The existing public demo
+continues to use browser-local data and does not call this operational path.
+
+For a new operational database, apply the baseline schema and then all migrations
+in filename order. For a linked Supabase project, use the normal migration push
+workflow so the production-control RPCs and grants are installed together.
+
+Run `npm test` before applying operational migrations. The database tests execute
+the production-control migration and complete Build Request-to-finished-goods
+lifecycle in an isolated PostgreSQL-compatible engine, including role grants,
+RLS, inventory reservation, shortage rollback, and idempotent posting.
+
 ### Public portfolio boundary
 
 The deployed public site is a sandbox, not an operational login surface:

@@ -44,7 +44,11 @@ exports.handler = async (event) => {
   }
 
   const lines = Array.isArray(order.lines) ? order.lines : [];
+  const lineKeys = new Set();
   for (const [index, line] of lines.entries()) {
+    const lineKey = String(line.lineKey || "").trim();
+    if (!lineKey || lineKeys.has(lineKey)) return badRequest(`Line ${index + 1} needs a unique stable line key`);
+    lineKeys.add(lineKey);
     const quantity = Math.round(Number(line.quantity));
     const reserved = Math.round(Number(line.reservedQty) || 0);
     const toShip = Math.round(Number(line.qtyToShip) || 0);
@@ -114,18 +118,20 @@ exports.handler = async (event) => {
     }
     const [savedRow] = await upsertResponse.json();
 
-    const deleteLinesResponse = await fetch(`${SUPABASE_URL}/rest/v1/order_lines?order_id=eq.${encodeURIComponent(order.id)}`, {
-      method: "DELETE",
-      headers: { ...headers, Prefer: "return=minimal" },
-    });
-    if (!deleteLinesResponse.ok) {
-      const detail = await deleteLinesResponse.text();
+    const existingLinesResponse = await fetch(
+      `${SUPABASE_URL}/rest/v1/order_lines?order_id=eq.${encodeURIComponent(order.id)}&select=line_key`,
+      { headers }
+    );
+    if (!existingLinesResponse.ok) {
+      const detail = await existingLinesResponse.text();
       return { statusCode: 502, body: JSON.stringify({ saved: false, error: detail }) };
     }
+    const existingLines = await existingLinesResponse.json();
 
     if (lines.length) {
       const lineRows = lines.map((line, index) => ({
         order_id: order.id,
+        line_key: String(line.lineKey),
         item_id: Number.isInteger(Number(line.itemId)) && Number(line.itemId) > 0 ? Number(line.itemId) : null,
         sort_order: index,
         part: line.part || "",
@@ -144,14 +150,33 @@ exports.handler = async (event) => {
         taxable: Boolean(line.taxable),
         source: line.source || "MDB demo",
       }));
-      const linesResponse = await fetch(`${SUPABASE_URL}/rest/v1/order_lines`, {
+      const linesResponse = await fetch(`${SUPABASE_URL}/rest/v1/order_lines?on_conflict=order_id,line_key`, {
         method: "POST",
-        headers: { ...headers, Prefer: "return=minimal" },
+        headers: { ...headers, Prefer: "resolution=merge-duplicates,return=minimal" },
         body: JSON.stringify(lineRows),
       });
       if (!linesResponse.ok) {
         const detail = await linesResponse.text();
         return { statusCode: 502, body: JSON.stringify({ saved: false, error: detail }) };
+      }
+    }
+
+    for (const existingLine of existingLines) {
+      if (lineKeys.has(existingLine.line_key)) continue;
+      const deleteLineResponse = await fetch(
+        `${SUPABASE_URL}/rest/v1/order_lines?order_id=eq.${encodeURIComponent(order.id)}&line_key=eq.${encodeURIComponent(existingLine.line_key)}`,
+        { method: "DELETE", headers: { ...headers, Prefer: "return=minimal" } }
+      );
+      if (!deleteLineResponse.ok) {
+        const detail = await deleteLineResponse.text();
+        return {
+          statusCode: 409,
+          body: JSON.stringify({
+            saved: false,
+            error: "A Sales Order line linked to production demand cannot be removed.",
+            detail,
+          }),
+        };
       }
     }
 

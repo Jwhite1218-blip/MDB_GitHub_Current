@@ -36,24 +36,37 @@ exports.handler = async (event) => {
   if (!build.id) {
     return { statusCode: 400, body: "Missing id" };
   }
-  const allowedStatuses = new Set(["Open", "Released", "Finished"]);
-  if (!allowedStatuses.has(build.status || "Open")) return badRequest("Invalid build status");
+  // This legacy endpoint is draft-only. Authenticated lifecycle changes and
+  // inventory activity must use production-control.mts and the transactional
+  // database RPCs.
+  if ((build.status || "Open") !== "Open") {
+    return {
+      statusCode: 409,
+      body: JSON.stringify({ saved: false, error: "Use Production Control to transition or post a Build Order." }),
+    };
+  }
   const quantity = Math.round(Number(build.quantity));
   const builtQty = Math.round(Number(build.builtQty) || 0);
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 5000) return badRequest("Invalid build quantity");
   if (!Number.isFinite(builtQty) || builtQty < 0 || builtQty > quantity) return badRequest("Invalid built quantity");
+  if (builtQty !== 0) return badRequest("Draft Build Orders cannot contain posted output");
 
   const components = Array.isArray(build.components) ? build.components : [];
+  const componentKeys = new Set();
   for (const [index, line] of components.entries()) {
+    const componentKey = String(line.componentKey || "").trim();
+    if (!componentKey || componentKeys.has(componentKey)) return badRequest(`Component ${index + 1} needs a unique stable key`);
+    componentKeys.add(componentKey);
     const qtyRequired = Number(line.qtyRequired);
+    const qtyReserved = Number(line.qtyReserved) || 0;
     const qtyConsumed = Number(line.qtyConsumed) || 0;
     if (!Number.isFinite(qtyRequired) || qtyRequired < 0) return badRequest(`Component ${index + 1} has an invalid required quantity`);
-    if (!Number.isFinite(qtyConsumed) || qtyConsumed < 0 || qtyConsumed > qtyRequired) return badRequest(`Component ${index + 1} has an impossible consumption state`);
+    if (qtyReserved !== 0 || qtyConsumed !== 0) return badRequest(`Draft component ${index + 1} cannot contain reservations or consumption`);
   }
 
-  const allowedEventTypes = new Set(["Created", "Released", "Consumed", "Finished", "Reopened", "Edited"]);
-  const events = Array.isArray(build.events) ? build.events.filter((entry) => entry?.key && entry?.summary) : [];
-  if (events.some((entry) => !allowedEventTypes.has(entry.type || "Edited"))) return badRequest("Invalid build event type");
+  const events = Array.isArray(build.events)
+    ? build.events.filter((entry) => entry?.key && entry?.summary && ["Created", "Edited"].includes(entry.type || "Edited"))
+    : [];
 
   const headers = {
     apikey: SUPABASE_SERVICE_KEY,
@@ -87,6 +100,28 @@ exports.handler = async (event) => {
   if (build.buildNumber) buildRow.build_number = build.buildNumber;
 
   try {
+    const existingBuildResponse = await fetch(
+      `${SUPABASE_URL}/rest/v1/build_orders?id=eq.${encodeURIComponent(build.id)}&select=status,build_request_id`,
+      { headers }
+    );
+    if (!existingBuildResponse.ok) {
+      const detail = await existingBuildResponse.text();
+      return { statusCode: 502, body: JSON.stringify({ saved: false, error: detail }) };
+    }
+    const [existingBuild] = await existingBuildResponse.json();
+    if (existingBuild && existingBuild.status !== "Open") {
+      return {
+        statusCode: 409,
+        body: JSON.stringify({ saved: false, error: "Released, finished, or cancelled Build Orders are controlled by Production Control." }),
+      };
+    }
+    if (existingBuild?.build_request_id) {
+      return {
+        statusCode: 409,
+        body: JSON.stringify({ saved: false, error: "Sales-linked Build Orders must be prepared through Production Control." }),
+      };
+    }
+
     const upsertResponse = await fetch(`${SUPABASE_URL}/rest/v1/build_orders?on_conflict=id`, {
       method: "POST",
       headers: { ...headers, Prefer: "resolution=merge-duplicates,return=representation" },
@@ -98,34 +133,49 @@ exports.handler = async (event) => {
     }
     const [savedRow] = await upsertResponse.json();
 
-    const deleteComponentsResponse = await fetch(`${SUPABASE_URL}/rest/v1/build_order_components?build_order_id=eq.${encodeURIComponent(build.id)}`, {
-      method: "DELETE",
-      headers: { ...headers, Prefer: "return=minimal" },
-    });
-    if (!deleteComponentsResponse.ok) {
-      const detail = await deleteComponentsResponse.text();
+    const existingComponentsResponse = await fetch(
+      `${SUPABASE_URL}/rest/v1/build_order_components?build_order_id=eq.${encodeURIComponent(build.id)}&select=component_key`,
+      { headers }
+    );
+    if (!existingComponentsResponse.ok) {
+      const detail = await existingComponentsResponse.text();
       return { statusCode: 502, body: JSON.stringify({ saved: false, error: detail }) };
     }
+    const existingComponents = await existingComponentsResponse.json();
 
     if (components.length) {
       const componentRows = components.map((line, index) => ({
         build_order_id: build.id,
+        component_key: String(line.componentKey),
         item_id: Number.isInteger(Number(line.itemId)) && Number(line.itemId) > 0 ? Number(line.itemId) : null,
         sort_order: index,
         part: line.part || "",
         description: line.description || "",
         uom: line.uom || "EA",
         qty_required: Number(line.qtyRequired) || 0,
+        qty_reserved: 0,
         qty_consumed: Number(line.qtyConsumed) || 0,
       }));
-      const componentsResponse = await fetch(`${SUPABASE_URL}/rest/v1/build_order_components`, {
+      const componentsResponse = await fetch(`${SUPABASE_URL}/rest/v1/build_order_components?on_conflict=build_order_id,component_key`, {
         method: "POST",
-        headers: { ...headers, Prefer: "return=minimal" },
+        headers: { ...headers, Prefer: "resolution=merge-duplicates,return=minimal" },
         body: JSON.stringify(componentRows),
       });
       if (!componentsResponse.ok) {
         const detail = await componentsResponse.text();
         return { statusCode: 502, body: JSON.stringify({ saved: false, error: detail }) };
+      }
+    }
+
+    for (const existingComponent of existingComponents) {
+      if (componentKeys.has(existingComponent.component_key)) continue;
+      const deleteComponentResponse = await fetch(
+        `${SUPABASE_URL}/rest/v1/build_order_components?build_order_id=eq.${encodeURIComponent(build.id)}&component_key=eq.${encodeURIComponent(existingComponent.component_key)}`,
+        { method: "DELETE", headers: { ...headers, Prefer: "return=minimal" } }
+      );
+      if (!deleteComponentResponse.ok) {
+        const detail = await deleteComponentResponse.text();
+        return { statusCode: 409, body: JSON.stringify({ saved: false, error: "A controlled Build component cannot be removed.", detail }) };
       }
     }
 

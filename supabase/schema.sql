@@ -5,8 +5,9 @@
 -- Row Level Security stays enabled as defense in depth and anon/authenticated
 -- Data API grants are explicitly revoked.
 --
--- Run this once in the Supabase SQL editor (or via `supabase db push`
--- once a CLI project is linked) to set up the tables.
+-- This file is the baseline schema. After applying it, apply every migration
+-- in filename order. The authenticated Production Control foundation is in
+-- migrations/20260821143000_production_control_foundation.sql.
 
 -- Shared internal running record number (mirrors GP's "Master No." field).
 -- Used by both quotes and, eventually, orders -- one sequence, one number

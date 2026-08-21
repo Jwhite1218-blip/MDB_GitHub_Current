@@ -6,6 +6,13 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const appMode = document.querySelector('meta[name="mdb-app-mode"]')?.content || "public-demo";
 const isPublicDemo = appMode === "public-demo";
 const publicDemoIdentity = { initials: "DEMO", name: "Demo User", isAdmin: false };
+const productionDemoActors = {
+  sales: { role: "sales", initials: "SR", name: "Sales Representative", label: "Sales" },
+  production_controller: { role: "production_controller", initials: "PC", name: "Production Controller", label: "Production Control" },
+  shop: { role: "shop", initials: "SHOP", name: "Assigned Shop Employee", label: "Shop Floor" },
+  inventory_controller: { role: "inventory_controller", initials: "INV", name: "Inventory Controller", label: "Inventory Control" },
+};
+const productionShopAssignments = ["Fabrication Cell A", "Assembly Cell B", "Weld Cell"];
 const feedbackAccessKey = "mdb-feedback-access-v1";
 const feedbackAccessDuration = 14 * 24 * 60 * 60 * 1000;
 const feedbackPinHash = "7328f9713cf2421aed7685680e2b799ea64dedf2e76f82f1017d8bc8f80a992f";
@@ -168,11 +175,15 @@ const state = {
   buildsBackendConfigured: false,
   buildSaveTimer: null,
   activeBuildId: "",
-  buildListOpen: { open: true, released: true, finished: false },
+  buildListOpen: { open: true, released: true, finished: false, cancelled: false },
   buildTargetSearchTerm: "",
   buildTargetSearchTimer: null,
   buildComponentSearchTerm: "",
   buildComponentSearchTimer: null,
+  buildRequests: [],
+  buildRequestEditorOpen: false,
+  buildRequestFormError: "",
+  buildWorkspaceRole: "production_controller",
   rigQuoteFiles: {},
   stock: {},
   touches: {},
@@ -527,6 +538,9 @@ const workspaceEntries = [
   ["Tooling", "Full catalog and CTS search", "tooling", "tooling drive cap split spoon hsa auger hex cor moyno drill rod"],
   ["Quote Builder", "Shared team quotes, GP-style layout", "quotes", "quote pricing estimate builder"],
   ["Orders", "Open orders, shipped and backorder tracking", "orders", "order orders open backorder shipped fulfillment"],
+  ["Build Requests", "Sales demand sent to Production Control", "buildRequests", "build request production tracking sales demand"],
+  ["Production Control", "Gatekeeper queue, commitments, and shop direction", "productionControl", "gatekeeper production schedule assign priority release"],
+  ["Build Orders", "Controlled shop execution and finished output", "builds", "build manufacturing production order shop components"],
   ["Inventory", "Editable GP-field demo", "inventory", "inventory stock available on hand allocated bin price"],
   ["Rig / BOM View", "B57 and B37X serial BOMs", "bom", "rig bom serial assembly parts bill material b57 b37x"],
   ["Calibration", "Calibration history, schedule, and quote", "calibration", "calibration hammer schedule certificate"],
@@ -804,6 +818,11 @@ function newOrder(overrides = {}) {
   return normalizeOrder(order);
 }
 
+function newDocumentLineKey(prefix) {
+  if (globalThis.crypto?.randomUUID) return `${prefix}-${crypto.randomUUID()}`;
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function recordOrderEvent(order, type, summary, detail = "") {
   const identity = state.identity || publicDemoIdentity;
   order.events ||= [];
@@ -827,6 +846,7 @@ function normalizeOrder(order) {
   order.closedAt ||= null;
   order.lines = (Array.isArray(order.lines) ? order.lines : []).map((line) => ({
     ...line,
+    lineKey: line.lineKey || newDocumentLineKey("order-line"),
     quantity: Math.max(1, Number(line.quantity) || 1),
     reservedQty: Math.max(0, Number(line.reservedQty) || 0),
     qtyToShip: Math.max(0, Number(line.qtyToShip) || 0),
@@ -998,6 +1018,9 @@ function newBuild(overrides = {}) {
     quantity: 1, builtQty: 0, dueDate: "", locationCode: "MAIN",
     status: "Open", notes: "",
     releasedAt: null, releasedByInitials: "", releasedByName: "", finishedAt: null,
+    buildRequestId: null, controllerName: "", shopAssigneeName: "",
+    priority: 3, requestedDueDate: "", committedDueDate: "",
+    exceptionCode: null, exceptionDetail: "", revision: 1,
     components: [], events: [],
     originatorInitials: identity?.initials || "", originatorName: identity?.name || "",
     lastModifiedByInitials: identity?.initials || "", lastModifiedByName: identity?.name || "",
@@ -1027,11 +1050,22 @@ function normalizeBuild(build) {
   build.releasedByInitials ||= "";
   build.releasedByName ||= "";
   build.finishedAt ||= null;
+  build.buildRequestId ||= null;
+  build.controllerName ||= "";
+  build.shopAssigneeName ||= "";
+  build.priority = Math.min(5, Math.max(1, Number(build.priority) || 3));
+  build.requestedDueDate ||= "";
+  build.committedDueDate ||= build.dueDate || "";
+  build.exceptionCode ||= null;
+  build.exceptionDetail ||= "";
+  build.revision = Math.max(1, Number(build.revision) || 1);
   build.quantity = Math.max(1, Number(build.quantity) || 1);
   build.builtQty = Math.max(0, Math.min(build.quantity, Number(build.builtQty) || 0));
   build.components = (Array.isArray(build.components) ? build.components : []).map((line) => ({
     ...line,
+    componentKey: line.componentKey || newDocumentLineKey("build-component"),
     qtyRequired: Math.max(0, Number(line.qtyRequired) || 0),
+    qtyReserved: Math.max(0, Number(line.qtyReserved) || 0),
     qtyConsumed: Math.max(0, Number(line.qtyConsumed) || 0),
   }));
   return build;
@@ -1101,6 +1135,405 @@ function touchBuild(build) {
   saveBuilds();
   clearTimeout(state.buildSaveTimer);
   state.buildSaveTimer = setTimeout(() => pushBuildToBackend(build), 600);
+}
+
+function productionActor(role) {
+  return productionDemoActors[role] || productionDemoActors.sales;
+}
+
+function productionTimestamp(daysAgo = 0) {
+  const date = new Date();
+  date.setDate(date.getDate() - daysAgo);
+  return date.toISOString();
+}
+
+function recordBuildRequestEvent(request, type, summary, detail = "", actorRole = "sales") {
+  const actor = productionActor(actorRole);
+  request.events ||= [];
+  request.events.unshift({
+    key: `request-event-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    type,
+    summary,
+    detail,
+    actorRole,
+    actorInitials: actor.initials,
+    actorName: actor.name,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+function normalizeBuildRequest(request) {
+  request.events = Array.isArray(request.events) ? request.events : [];
+  request.status ||= "Draft";
+  request.originatorName ||= "Sales Representative";
+  request.originatorInitials ||= "SR";
+  request.gatekeeperName ||= "";
+  request.buildOrderId ||= null;
+  request.requestedQuantity = Math.max(1, Number(request.requestedQuantity) || 1);
+  request.requestedShipDate ||= "";
+  request.customerRequirements ||= "";
+  request.returnedReason ||= "";
+  request.createdAt ||= new Date().toISOString();
+  request.updatedAt ||= request.createdAt;
+  return request;
+}
+
+function saveBuildRequests() {
+  safeSave("mdb-demo-build-requests", state.buildRequests);
+}
+
+function loadBuildRequests() {
+  state.buildRequests = safeLoad("mdb-demo-build-requests", []).map(normalizeBuildRequest);
+}
+
+function nextBuildRequestNumber() {
+  const highest = state.buildRequests.reduce((max, request) => {
+    const value = Number(String(request.requestNumber || "").replace(/\D/g, ""));
+    return Number.isFinite(value) ? Math.max(max, value) : max;
+  }, 999);
+  return `BRQ${String(highest + 1).padStart(6, "0")}`;
+}
+
+function buildForRequest(request) {
+  return state.builds.find((build) => build.id === request.buildOrderId || build.buildRequestId === request.id) || null;
+}
+
+function requestStage(request) {
+  if (request.status === "Cancelled") return "Cancelled";
+  if (request.status === "Fulfilled") return "Complete";
+  if (request.status === "Returned") return "Needs Information";
+  if (request.status === "Draft") return "Draft";
+  if (request.status === "Submitted") return "Waiting for Production Control";
+  const build = buildForRequest(request);
+  if (!build) return "Accepted";
+  if (build.status === "Cancelled") return "Cancelled";
+  if (build.status === "Finished") return "Complete";
+  if (build.exceptionCode === "blocked") return "Blocked";
+  if (build.exceptionCode === "on_hold") return "On Hold";
+  if (build.exceptionCode === "customer_change") return "Change Requested";
+  if (build.status === "Released" && Number(build.builtQty) > 0) return "In Production";
+  if (build.status === "Released") return "Released to Shop";
+  return "Scheduled";
+}
+
+function requestStageIndex(request) {
+  const stage = requestStage(request);
+  if (["Draft", "Needs Information"].includes(stage)) return 0;
+  if (stage === "Waiting for Production Control") return 1;
+  if (["Accepted", "Scheduled", "Change Requested"].includes(stage)) return 2;
+  if (["Released to Shop", "Blocked", "On Hold"].includes(stage)) return 3;
+  if (stage === "In Production") return 4;
+  if (stage === "Complete") return 5;
+  return -1;
+}
+
+function requestSourceLines() {
+  const requestedByLine = new Map();
+  state.buildRequests.filter((request) => request.status !== "Cancelled").forEach((request) => {
+    const key = `${request.sourceOrderId}::${request.sourceOrderLineKey}`;
+    requestedByLine.set(key, (requestedByLine.get(key) || 0) + Number(request.requestedQuantity || 0));
+  });
+  return state.orders.flatMap((order) => order.lines.map((line) => {
+    const key = `${order.id}::${line.lineKey}`;
+    const remaining = Math.max(0, Number(line.quantity || 0) - Number(line.shippedQty || 0) - (requestedByLine.get(key) || 0));
+    return { order, line, key, remaining };
+  })).filter((entry) => entry.line.part && entry.remaining > 0);
+}
+
+function requestSourceLabel(request) {
+  const order = state.orders.find((item) => item.id === request.sourceOrderId);
+  return `${request.sourceOrderNumber || order?.orderNumber || "Sales Order"} · ${request.part}`;
+}
+
+function ensureProductionControlDemo() {
+  if (!isPublicDemo || state.buildRequests.length) return;
+  const sourceItems = state.items.filter((item) => item.partNumber && item.status !== "Blocked").slice(0, 4);
+  if (!sourceItems.length) return;
+  while (sourceItems.length < 4) sourceItems.push(sourceItems[sourceItems.length % sourceItems.length]);
+
+  let sourceOrder = state.orders.find((order) => order.lines?.length >= 3);
+  if (!sourceOrder) {
+    sourceOrder = newOrder({
+      id: "demo-production-demand-order",
+      orderNumber: "ORD0069246",
+      customerId: customers[0]?.id || "",
+      salesperson: "Sales Representative",
+      reqShipDate: new Date(Date.now() + 12 * 86400000).toISOString().slice(0, 10),
+      status: "Released",
+      releasedAt: productionTimestamp(6),
+      releasedByInitials: "SR",
+      releasedByName: "Sales Representative",
+      lines: sourceItems.slice(0, 3).map((item, index) => ({
+        lineKey: `demo-production-line-${index + 1}`,
+        itemId: item.id || null,
+        sortOrder: index,
+        part: item.partNumber,
+        description: item.description || "Production demand item",
+        category: item.itemClass || "Assembly",
+        uom: item.uom || "EA",
+        quantity: index === 2 ? 3 : 2,
+        reservedQty: 0,
+        qtyToShip: 0,
+        shippedQty: 0,
+        qtyToInvoice: 0,
+        invoicedQty: 0,
+        backorderQty: 0,
+        unitPrice: Number(item.listPrice) || 0,
+        discount: 0,
+        taxable: false,
+        source: "Production Control portfolio seed",
+      })),
+      events: [{
+        key: "demo-production-order-release",
+        type: "Released",
+        summary: "Order released",
+        detail: "Customer demand is ready for production review.",
+        actorInitials: "SR",
+        actorName: "Sales Representative",
+        createdAt: productionTimestamp(6),
+      }],
+      createdAt: productionTimestamp(7),
+      lastModifiedAt: productionTimestamp(6),
+    });
+    state.orders.unshift(sourceOrder);
+    saveOrders();
+  }
+
+  const lines = sourceOrder.lines.slice(0, 3);
+  if (lines.length < 3) return;
+  const requestSeed = (id, number, line, status, daysAgo) => normalizeBuildRequest({
+    id,
+    requestNumber: number,
+    sourceOrderId: sourceOrder.id,
+    sourceOrderNumber: sourceOrder.orderNumber,
+    sourceOrderLineKey: line.lineKey,
+    originatorName: "Sales Representative",
+    originatorInitials: "SR",
+    gatekeeperName: status === "Submitted" ? "" : "Production Controller",
+    itemId: line.itemId || null,
+    part: line.part,
+    description: line.description,
+    uom: line.uom || "EA",
+    requestedQuantity: Math.min(2, Number(line.quantity) || 1),
+    requestedShipDate: sourceOrder.reqShipDate,
+    customerRequirements: "Customer order requires an in-house build before shipment.",
+    status,
+    createdAt: productionTimestamp(daysAgo),
+    updatedAt: productionTimestamp(daysAgo),
+    events: [{
+      key: `${id}-submitted`,
+      type: "Submitted",
+      summary: "Submitted to Production Control",
+      detail: "Sales demand captured from the exact Sales Order line.",
+      actorRole: "sales",
+      actorInitials: "SR",
+      actorName: "Sales Representative",
+      createdAt: productionTimestamp(daysAgo),
+    }],
+  });
+
+  const waiting = requestSeed("demo-request-waiting", "BRQ001000", lines[0], "Submitted", 1);
+  const scheduled = requestSeed("demo-request-scheduled", "BRQ001001", lines[1], "Accepted", 3);
+  const inProduction = requestSeed("demo-request-production", "BRQ001002", lines[2], "Accepted", 5);
+
+  const scheduledBuild = newBuild({
+    id: "demo-controlled-build-scheduled",
+    buildNumber: "BLD001000",
+    buildRequestId: scheduled.id,
+    itemId: scheduled.itemId,
+    part: scheduled.part,
+    description: scheduled.description,
+    uom: scheduled.uom,
+    quantity: scheduled.requestedQuantity,
+    dueDate: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+    requestedDueDate: scheduled.requestedShipDate,
+    committedDueDate: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+    priority: 2,
+    controllerName: "Production Controller",
+    shopAssigneeName: "Fabrication Cell A",
+    originatorInitials: "SR",
+    originatorName: "Sales Representative",
+    notes: scheduled.customerRequirements,
+    createdAt: productionTimestamp(3),
+    lastModifiedAt: productionTimestamp(2),
+  });
+  scheduled.buildOrderId = scheduledBuild.id;
+  scheduled.events.unshift({
+    key: "demo-request-scheduled-accepted",
+    type: "Accepted",
+    summary: "Accepted and scheduled",
+    detail: "Production Control committed the date and assigned Fabrication Cell A.",
+    actorRole: "production_controller",
+    actorInitials: "PC",
+    actorName: "Production Controller",
+    createdAt: productionTimestamp(2),
+  });
+
+  const component = sourceItems[3];
+  const activeBuild = newBuild({
+    id: "demo-controlled-build-active",
+    buildNumber: "BLD001001",
+    buildRequestId: inProduction.id,
+    itemId: inProduction.itemId,
+    part: inProduction.part,
+    description: inProduction.description,
+    uom: inProduction.uom,
+    quantity: 2,
+    builtQty: 1,
+    dueDate: new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10),
+    requestedDueDate: inProduction.requestedShipDate,
+    committedDueDate: new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10),
+    priority: 1,
+    controllerName: "Production Controller",
+    shopAssigneeName: "Assembly Cell B",
+    status: "Released",
+    releasedAt: productionTimestamp(2),
+    releasedByInitials: "PC",
+    releasedByName: "Production Controller",
+    originatorInitials: "SR",
+    originatorName: "Sales Representative",
+    notes: inProduction.customerRequirements,
+    components: [{
+      componentKey: "demo-controlled-component",
+      itemId: component.id || null,
+      part: component.partNumber,
+      description: component.description || "Production component",
+      uom: component.uom || "EA",
+      qtyRequired: 4,
+      qtyReserved: 2,
+      qtyConsumed: 2,
+      qtyToConsume: 0,
+    }],
+    events: [
+      { key: "demo-build-progress", type: "Posted", summary: "Build progress posted", detail: "1 EA output posted; 1 EA remains.", actorInitials: "SHOP", actorName: "Assigned Shop Employee", createdAt: productionTimestamp(1) },
+      { key: "demo-build-released", type: "Released", summary: "Build Order released", detail: "Components reserved; shop execution authorized.", actorInitials: "PC", actorName: "Production Controller", createdAt: productionTimestamp(2) },
+    ],
+    createdAt: productionTimestamp(4),
+    lastModifiedAt: productionTimestamp(1),
+  });
+  inProduction.buildOrderId = activeBuild.id;
+  inProduction.events.unshift({
+    key: "demo-request-production-accepted",
+    type: "Accepted",
+    summary: "Accepted and scheduled",
+    detail: "Production Control committed the date and assigned Assembly Cell B.",
+    actorRole: "production_controller",
+    actorInitials: "PC",
+    actorName: "Production Controller",
+    createdAt: productionTimestamp(4),
+  });
+
+  if (!state.builds.some((build) => build.id === scheduledBuild.id)) state.builds.unshift(scheduledBuild);
+  if (!state.builds.some((build) => build.id === activeBuild.id)) state.builds.unshift(activeBuild);
+  const componentStock = getStock(component.partNumber);
+  componentStock.onHand = Math.max(20, Number(componentStock.onHand) || 0);
+  componentStock.allocated = Math.max(2, Number(componentStock.allocated) || 0);
+  state.buildRequests = [waiting, scheduled, inProduction];
+  saveOrders();
+  saveBuilds();
+  saveBuildRequests();
+  saveStock();
+}
+
+function acceptBuildRequest(request, { committedDueDate, priority, shopAssigneeName }) {
+  if (request.status !== "Submitted") return;
+  if (!committedDueDate || !shopAssigneeName) {
+    showToast("Commit a completion date and shop assignment before accepting");
+    return;
+  }
+  const build = newBuild({
+    buildNumber: `BLD${String(1000 + state.builds.length).padStart(6, "0")}`,
+    buildRequestId: request.id,
+    itemId: request.itemId || null,
+    part: request.part,
+    description: request.description,
+    uom: request.uom || "EA",
+    quantity: request.requestedQuantity,
+    dueDate: committedDueDate,
+    requestedDueDate: request.requestedShipDate,
+    committedDueDate,
+    priority: Math.min(5, Math.max(1, Number(priority) || 3)),
+    controllerName: productionDemoActors.production_controller.name,
+    shopAssigneeName,
+    notes: request.customerRequirements,
+    originatorName: request.originatorName,
+    originatorInitials: request.originatorInitials,
+  });
+  recordBuildEvent(build, "Scheduled", "Build Order scheduled", `Created from ${request.requestNumber}; assigned to ${shopAssigneeName}.`);
+  state.builds.unshift(build);
+  request.status = "Accepted";
+  request.acceptedAt = new Date().toISOString();
+  request.gatekeeperName = productionDemoActors.production_controller.name;
+  request.buildOrderId = build.id;
+  request.returnedReason = "";
+  request.updatedAt = new Date().toISOString();
+  recordBuildRequestEvent(request, "Accepted", "Accepted and scheduled by Production Control", `${shopAssigneeName} · due ${committedDueDate}`, "production_controller");
+  saveBuilds();
+  saveBuildRequests();
+  renderProductionControlWorkspace();
+  showToast(`${request.requestNumber} accepted and scheduled`);
+}
+
+function returnBuildRequest(request, note) {
+  if (request.status !== "Submitted") return;
+  const reason = String(note || "").trim();
+  if (!reason) { showToast("Add the information Sales needs to supply"); return; }
+  request.status = "Returned";
+  request.returnedReason = reason;
+  request.gatekeeperName = productionDemoActors.production_controller.name;
+  request.updatedAt = new Date().toISOString();
+  recordBuildRequestEvent(request, "Returned", "Returned for information", reason, "production_controller");
+  saveBuildRequests();
+  renderProductionControlWorkspace();
+  showToast(`${request.requestNumber} returned to Sales`);
+}
+
+function resubmitBuildRequest(request) {
+  if (!['Draft', 'Returned'].includes(request.status)) return;
+  request.status = "Submitted";
+  request.returnedReason = "";
+  request.updatedAt = new Date().toISOString();
+  recordBuildRequestEvent(request, "Submitted", "Resubmitted to Production Control", "Requested information was reviewed by Sales.", "sales");
+  saveBuildRequests();
+  renderBuildRequestsWorkspace();
+  showToast(`${request.requestNumber} resubmitted`);
+}
+
+function cancelBuildRequest(request) {
+  if (["Fulfilled", "Cancelled"].includes(request.status)) return;
+  const build = buildForRequest(request);
+  if (build && (build.status === "Released" || Number(build.builtQty) > 0 || build.components.some((line) => Number(line.qtyConsumed) > 0))) {
+    showToast("Production Control must cancel released or started work");
+    return;
+  }
+  if (build) {
+    build.status = "Cancelled";
+    recordBuildEvent(build, "Cancelled", "Build Order cancelled", "Sales demand was withdrawn before release.");
+    touchBuild(build);
+  }
+  request.status = "Cancelled";
+  request.cancelledAt = new Date().toISOString();
+  request.updatedAt = new Date().toISOString();
+  recordBuildRequestEvent(request, "Cancelled", "Build Request cancelled", "Demand withdrawn before production activity.", "sales");
+  saveBuildRequests();
+  renderBuildRequestsWorkspace();
+  showToast(`${request.requestNumber} cancelled`);
+}
+
+function requestBuildChange(request) {
+  if (request.status !== "Accepted") return;
+  const build = buildForRequest(request);
+  if (!build || build.status === "Finished") return;
+  build.exceptionCode = "customer_change";
+  build.exceptionDetail = "Sales reported a customer requirement change; Production Control review is required.";
+  build.revision += 1;
+  recordBuildEvent(build, "Edited", "Customer change requested", build.exceptionDetail);
+  touchBuild(build);
+  recordBuildRequestEvent(request, "ChangeRequested", "Change requested", build.exceptionDetail, "sales");
+  request.updatedAt = new Date().toISOString();
+  saveBuildRequests();
+  renderBuildRequestsWorkspace();
+  showToast("Production Control was notified without rewriting the Build Order");
 }
 
 let backorderResolveCallback = null;
@@ -1278,6 +1711,7 @@ async function loadData() {
   await loadQuotes();
   await loadOrders();
   await loadBuilds();
+  loadBuildRequests();
   loadRigSalesOpportunities();
   state.identity = isPublicDemo
     ? { ...publicDemoIdentity }
@@ -1288,6 +1722,7 @@ async function loadData() {
   buildToolItems();
   buildItemMaster();
   await loadItems();
+  ensureProductionControlDemo();
   state.ready = true;
   buildSearchIndex();
   elements.globalSearchInput.placeholder = "Search customer, tooling, part number, rig or serial...";
@@ -1666,7 +2101,7 @@ function openWorkspace(type, options = {}) {
   const customer = customers.find((item) => item.id === state.selectedCustomerId);
   elements.overlayEyebrow.textContent = type === "customerTooling" ? customer?.name || "Customer" : "MDB";
   const titles = {
-    items: "Items", tooling: "Tooling", customerTooling: "Customer Tooling", quotes: "Quote Builder", orders: "Orders", builds: "Build Orders", inventory: "Inventory", bom: "Rig / BOM View", rigSpecs: "Rig Specifications",
+    items: "Items", tooling: "Tooling", customerTooling: "Customer Tooling", quotes: "Quote Builder", orders: "Orders", buildRequests: "Build Requests", productionControl: "Production Control", builds: "Build Orders", inventory: "Inventory", bom: "Rig / BOM View", rigSpecs: "Rig Specifications",
     calibration: "Calibration", rigSales: "Rig Sales", prospects: "New Prospect Search", callList: "Daily Call List",
     calibrationTraining: "Calibration Training", workflowTraining: "Workflow Training",
     reports: "Sales Reports",
@@ -1684,6 +2119,8 @@ function openWorkspace(type, options = {}) {
   }
   if (type === "quotes") { renderQuoteWorkspace(); if (state.quotesBackendConfigured) loadQuotes().then(() => { if (state.activeWorkspace === "quotes") renderQuoteWorkspace(); }); }
   if (type === "orders") { renderOrdersWorkspace(); if (state.ordersBackendConfigured) loadOrders().then(() => { if (state.activeWorkspace === "orders") renderOrdersWorkspace(); }); }
+  if (type === "buildRequests") renderBuildRequestsWorkspace();
+  if (type === "productionControl") renderProductionControlWorkspace();
   if (type === "builds") { renderBuildsWorkspace(); if (state.buildsBackendConfigured) loadBuilds().then(() => { if (state.activeWorkspace === "builds") renderBuildsWorkspace(); }); }
   if (type === "inventory") { renderInventoryWorkspace(options.query || ""); if (state.inventoryBackendConfigured) loadInventory(); }
   if (type === "bom") renderBomWorkspace(options);
@@ -2425,50 +2862,96 @@ function buildRemainingQty(build) {
   return Math.max(0, Number(build.quantity || 0) - Number(build.builtQty || 0));
 }
 
+function canControlBuild() {
+  return state.buildWorkspaceRole === "production_controller";
+}
+
+function canPostBuild() {
+  return ["shop", "production_controller", "inventory_controller"].includes(state.buildWorkspaceRole);
+}
+
 function buildReadiness(build) {
   const missing = [];
   if (!build.part) missing.push("what to build");
   if (!(Number(build.quantity) > 0)) missing.push("a quantity");
+  if (!build.committedDueDate) missing.push("a committed completion date");
+  if (!build.shopAssigneeName) missing.push("a shop assignment");
   return { missing, canRelease: build.status === "Open" && missing.length === 0 };
 }
 
 function releaseBuild(build) {
+  if (!canControlBuild()) { showToast("Only Production Control can release work to the shop"); return; }
   const readiness = buildReadiness(build);
   if (!readiness.canRelease) { showToast(`Can't release yet — add ${readiness.missing.join(" and ")}.`); return; }
+  const reservations = build.components.map((line) => {
+    const needed = Math.max(0, Number(line.qtyRequired) - Number(line.qtyConsumed) - Number(line.qtyReserved));
+    const stock = line.part ? getStock(line.part) : null;
+    const available = stock ? Math.max(0, Number(stock.onHand) - Number(stock.allocated)) : 0;
+    return { line, stock, needed, available };
+  });
+  const shortage = reservations.find(({ needed, available }) => needed > available);
+  if (shortage) {
+    showToast(`Can't release — ${shortage.line.part || "a component"} needs ${shortage.needed}, but only ${shortage.available} is available.`);
+    return;
+  }
+  reservations.forEach(({ line, stock, needed }) => {
+    if (!needed || !stock) return;
+    stock.allocated = Number(stock.allocated) + needed;
+    line.qtyReserved = Number(line.qtyReserved) + needed;
+  });
   build.status = "Released";
   build.releasedAt = new Date().toISOString();
   build.releasedByInitials = state.identity?.initials || publicDemoIdentity.initials;
   build.releasedByName = state.identity?.name || publicDemoIdentity.name;
-  recordBuildEvent(build, "Released", "Build order released", "Shop can begin pulling components and building.");
+  recordBuildEvent(build, "Released", "Build Order released", "Production Control reserved available components and released the assignment to the shop.");
+  const request = state.buildRequests.find((entry) => entry.id === build.buildRequestId);
+  if (request) recordBuildRequestEvent(request, "Released", "Released to the shop", `${build.shopAssigneeName} can begin execution.`, "production_controller");
+  saveStock();
+  saveBuildRequests();
   touchBuild(build);
   renderBuildModal();
   showToast("Build order released to the shop");
 }
 
 function reopenBuild(build) {
+  if (!canControlBuild()) { showToast("Only Production Control can reopen released work"); return; }
   if (build.status !== "Released") return;
   if (Number(build.builtQty) > 0 || build.components.some((line) => Number(line.qtyConsumed) > 0)) {
     showToast("Can't reopen — components have already been consumed against this build.");
     return;
   }
+  build.components.forEach((line) => {
+    if (!line.part || !(Number(line.qtyReserved) > 0)) return;
+    const stock = getStock(line.part);
+    stock.allocated = Math.max(0, Number(stock.allocated) - Number(line.qtyReserved));
+    line.qtyReserved = 0;
+    line.qtyToConsume = 0;
+  });
   build.status = "Open";
   build.releasedAt = null;
   build.releasedByInitials = "";
   build.releasedByName = "";
-  recordBuildEvent(build, "Reopened", "Build order reopened", "Nothing had been consumed or built yet.");
+  recordBuildEvent(build, "Reopened", "Build Order reopened", "Unused component reservations were returned to available inventory.");
+  const request = state.buildRequests.find((entry) => entry.id === build.buildRequestId);
+  if (request) recordBuildRequestEvent(request, "Reopened", "Returned to Production Control", "The release was reversed before production began.", "production_controller");
+  saveStock();
+  saveBuildRequests();
   touchBuild(build);
   renderBuildModal();
   showToast("Build order reopened for editing");
 }
 
 function postBuild(build) {
+  if (!canPostBuild()) { showToast("Use the Shop Floor or Production Control view to post build progress"); return; }
   if (build.status !== "Released") return;
   let consumedNow = 0;
   build.components.forEach((line) => {
-    const consume = Math.max(0, Math.min(Number(line.qtyToConsume) || 0, line.qtyRequired - line.qtyConsumed));
+    const consume = Math.max(0, Math.min(Number(line.qtyToConsume) || 0, Number(line.qtyReserved), line.qtyRequired - line.qtyConsumed));
     if (consume > 0 && line.part) {
       const stock = getStock(line.part);
       stock.onHand = Math.max(0, Number(stock.onHand) - consume);
+      stock.allocated = Math.max(0, Number(stock.allocated) - consume);
+      line.qtyReserved = Math.max(0, Number(line.qtyReserved) - consume);
       line.qtyConsumed += consume;
       consumedNow += consume;
     }
@@ -2482,14 +2965,29 @@ function postBuild(build) {
   }
   build.qtyToFinish = 0;
   if (!consumedNow && !finishNow) { showToast("Enter a quantity to consume or finish first"); return; }
-  saveStock();
   if (consumedNow) recordBuildEvent(build, "Consumed", "Components consumed", `${consumedNow} unit${consumedNow === 1 ? "" : "s"} pulled from inventory.`);
   if (finishNow) recordBuildEvent(build, "Finished", "Build progress posted", `${finishNow} ${build.uom || "EA"} of ${build.part} completed.`);
   if (build.builtQty >= build.quantity) {
     build.status = "Finished";
     build.finishedAt = new Date().toISOString();
-    recordBuildEvent(build, "Finished", "Build order finished", "Full build quantity completed.");
+    build.components.forEach((line) => {
+      if (!line.part || !(Number(line.qtyReserved) > 0)) return;
+      const stock = getStock(line.part);
+      stock.allocated = Math.max(0, Number(stock.allocated) - Number(line.qtyReserved));
+      line.qtyReserved = 0;
+      line.qtyToConsume = 0;
+    });
+    recordBuildEvent(build, "Finished", "Build Order finished", "Full build quantity completed; unused reservations were released.");
+    const request = state.buildRequests.find((entry) => entry.id === build.buildRequestId);
+    if (request && request.status === "Accepted") {
+      request.status = "Fulfilled";
+      request.fulfilledAt = new Date().toISOString();
+      request.updatedAt = request.fulfilledAt;
+      recordBuildRequestEvent(request, "Fulfilled", "Production completed", `${build.buildNumber || "Build Order"} completed the requested quantity.`, "shop");
+      saveBuildRequests();
+    }
   }
+  saveStock();
   touchBuild(build);
   renderBuildModal();
   showToast(build.status === "Finished" ? "Build order finished" : "Build progress posted");
@@ -2558,6 +3056,154 @@ function renderOrdersWorkspace() {
   </div>`;
 }
 
+function requestLifecycleHtml(request) {
+  const activeIndex = requestStageIndex(request);
+  const steps = ["Requested", "Gatekeeper", "Scheduled", "Released", "Building", "Complete"];
+  return `<div class="request-lifecycle" aria-label="Build Request lifecycle">${steps.map((step, index) => `<div class="${index < activeIndex ? "is-complete" : index === activeIndex ? "is-current" : ""}"><span>${index < activeIndex ? "✓" : index + 1}</span><small>${step}</small></div>`).join("")}</div>`;
+}
+
+function requestEventsHtml(request) {
+  return request.events.slice(0, 5).map((event) => `<div class="request-event"><span></span><div><strong>${escapeHTML(event.summary)}</strong><small>${new Date(event.createdAt).toLocaleString()} · ${escapeHTML(event.actorName || "MDB")}</small>${event.detail ? `<p>${escapeHTML(event.detail)}</p>` : ""}</div></div>`).join("") || '<p class="quote-list-empty">No request activity yet.</p>';
+}
+
+function buildRequestCardHtml(request, mode = "sales") {
+  const stage = requestStage(request);
+  const build = buildForRequest(request);
+  const stageClass = slugify(stage);
+  const controllerActions = request.status === "Submitted" ? `<div class="gatekeeper-decision">
+      <div class="gatekeeper-fields">
+        <label><span>Committed completion</span><input type="date" data-request-due="${request.id}" value="${escapeHTML(request.requestedShipDate || "")}"></label>
+        <label><span>Priority</span><select data-request-priority="${request.id}">${[1, 2, 3, 4, 5].map((priority) => `<option value="${priority}" ${priority === 3 ? "selected" : ""}>${priority}${priority === 1 ? " · Rush" : priority === 5 ? " · Lowest" : ""}</option>`).join("")}</select></label>
+        <label><span>Shop assignment</span><select data-request-assignee="${request.id}"><option value="">Choose a cell...</option>${productionShopAssignments.map((name) => `<option>${escapeHTML(name)}</option>`).join("")}</select></label>
+      </div>
+      <label class="gatekeeper-note"><span>Decision note / return reason</span><input data-request-note="${request.id}" placeholder="What Sales or the shop needs to know..."></label>
+      <div class="button-row"><button type="button" class="secondary-button" data-request-return="${request.id}">Return to Sales</button><button type="button" class="primary-button" data-request-accept="${request.id}">Accept &amp; Schedule</button></div>
+    </div>` : build ? `<div class="request-build-link"><div><span>Controlled Build Order</span><strong>${escapeHTML(build.buildNumber || "Pending number")}</strong><small>${escapeHTML(build.shopAssigneeName || "Shop not assigned")} · ${escapeHTML(build.committedDueDate || build.dueDate || "No committed date")}</small></div><button type="button" class="primary-button" data-request-open-build="${request.id}" data-request-open-build-role="production_controller">Open Build Order</button></div>` : "";
+  const salesActions = `<div class="request-actions">
+      ${request.status === "Returned" ? `<button type="button" class="primary-button" data-request-resubmit="${request.id}">Resubmit to Production Control</button>` : ""}
+      ${request.status === "Submitted" ? `<button type="button" class="secondary-button" data-request-cancel="${request.id}">Cancel Request</button>` : ""}
+      ${request.status === "Accepted" && build?.status !== "Finished" ? `<button type="button" class="secondary-button" data-request-change="${request.id}">Request a Change</button>` : ""}
+      ${build ? `<button type="button" class="primary-button" data-request-open-build="${request.id}" data-request-open-build-role="sales">Track Production Order</button>` : ""}
+    </div>`;
+  return `<article class="build-request-card" data-request-card="${request.id}">
+    <header><div><span>${escapeHTML(request.requestNumber)}</span><h3>${escapeHTML(request.part)}</h3><p>${escapeHTML(request.description || "Build requested")}</p></div><b class="request-stage is-${stageClass}">${escapeHTML(stage)}</b></header>
+    <div class="request-facts">
+      <div><span>Sales Order</span><strong>${escapeHTML(requestSourceLabel(request))}</strong></div>
+      <div><span>Requested</span><strong>${request.requestedQuantity} ${escapeHTML(request.uom || "EA")}</strong></div>
+      <div><span>Need date</span><strong>${escapeHTML(request.requestedShipDate || "Not specified")}</strong></div>
+      <div><span>Originator</span><strong>${escapeHTML(request.originatorName)}</strong></div>
+    </div>
+    ${request.returnedReason ? `<div class="request-exception"><strong>Production Control needs more information</strong><span>${escapeHTML(request.returnedReason)}</span></div>` : ""}
+    ${build?.exceptionDetail ? `<div class="request-exception"><strong>${escapeHTML(stage)}</strong><span>${escapeHTML(build.exceptionDetail)}</span></div>` : ""}
+    ${requestLifecycleHtml(request)}
+    ${mode === "controller" ? controllerActions : salesActions}
+    <details class="request-history"><summary>Request activity (${request.events.length})</summary>${requestEventsHtml(request)}</details>
+  </article>`;
+}
+
+function buildRequestSourceOptions() {
+  const entries = requestSourceLines();
+  if (!entries.length) return "";
+  return entries.map(({ order, line, key, remaining }) => `<option value="${escapeHTML(key)}">${escapeHTML(order.orderNumber || "Pending order")} · ${escapeHTML(line.part)} · ${remaining} ${escapeHTML(line.uom || "EA")} available to request</option>`).join("");
+}
+
+function renderBuildRequestEditor() {
+  const options = buildRequestSourceOptions();
+  if (!state.buildRequestEditorOpen) return "";
+  return `<section class="build-request-editor">
+    <header><div><span>SALES HANDOFF</span><h3>Request an in-house build</h3><p>The exact Sales Order line remains the source of demand. Production Control decides whether and when work is released.</p></div><button type="button" class="close-button" data-request-editor-close aria-label="Close request form">×</button></header>
+    ${options ? `<form id="buildRequestForm">
+      <label><span>Sales Order line</span><select name="sourceLine" required>${options}</select></label>
+      <label><span>Quantity needed</span><input name="requestedQuantity" type="number" min="1" max="5000" value="1" required></label>
+      <label><span>Customer need date</span><input name="requestedShipDate" type="date"></label>
+      <label class="is-wide"><span>Customer requirements / production context</span><textarea name="customerRequirements" rows="3" placeholder="What Production Control needs to make a sound commitment..."></textarea></label>
+      ${state.buildRequestFormError ? `<p class="form-error is-wide">${escapeHTML(state.buildRequestFormError)}</p>` : ""}
+      <div class="button-row is-wide"><button type="button" class="secondary-button" data-request-editor-close>Cancel</button><button type="submit" class="primary-button">Submit to Production Control</button></div>
+    </form>` : `<div class="request-empty-state"><strong>No unrequested Sales Order quantity is available.</strong><p>Create or release an Order with a buildable line, then return here.</p><button type="button" class="primary-button" data-request-open-orders>Open Orders</button></div>`}
+  </section>`;
+}
+
+function createBuildRequestFromForm(form) {
+  const values = new FormData(form);
+  const sourceKey = String(values.get("sourceLine") || "");
+  const source = requestSourceLines().find((entry) => entry.key === sourceKey);
+  const quantity = Math.floor(Number(values.get("requestedQuantity")) || 0);
+  if (!source || quantity < 1 || quantity > source.remaining) {
+    state.buildRequestFormError = source ? `Quantity must be between 1 and ${source.remaining}.` : "Choose an available Sales Order line.";
+    renderBuildRequestsWorkspace();
+    return;
+  }
+  const request = normalizeBuildRequest({
+    id: `request-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    requestNumber: nextBuildRequestNumber(),
+    sourceOrderId: source.order.id,
+    sourceOrderNumber: source.order.orderNumber,
+    sourceOrderLineKey: source.line.lineKey,
+    originatorName: productionDemoActors.sales.name,
+    originatorInitials: productionDemoActors.sales.initials,
+    itemId: source.line.itemId || itemIdForPart(source.line.part),
+    part: source.line.part,
+    description: source.line.description,
+    uom: source.line.uom || "EA",
+    requestedQuantity: quantity,
+    requestedShipDate: String(values.get("requestedShipDate") || source.order.reqShipDate || ""),
+    customerRequirements: String(values.get("customerRequirements") || "").trim(),
+    status: "Submitted",
+    submittedAt: new Date().toISOString(),
+    events: [],
+  });
+  recordBuildRequestEvent(request, "Created", "Build Request created", `Demand captured from ${source.order.orderNumber || "the Sales Order"}.`, "sales");
+  recordBuildRequestEvent(request, "Submitted", "Submitted to Production Control", "Waiting for gatekeeper review and a production commitment.", "sales");
+  state.buildRequests.unshift(request);
+  state.buildRequestEditorOpen = false;
+  state.buildRequestFormError = "";
+  saveBuildRequests();
+  renderBuildRequestsWorkspace();
+  showToast(`${request.requestNumber} submitted to Production Control`);
+}
+
+function renderBuildRequestsWorkspace() {
+  const requests = [...state.buildRequests].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const waiting = requests.filter((request) => request.status === "Submitted").length;
+  const active = requests.filter((request) => request.status === "Accepted").length;
+  const completed = requests.filter((request) => request.status === "Fulfilled").length;
+  elements.overlayBody.innerHTML = `<div class="workbench production-workbench">
+    <div class="operations-toolbar"><div><strong>Build Requests</strong><span>Sales can request and track production without editing the shop's controlled Build Order.</span></div><button type="button" class="primary-button" data-request-new>New Build Request</button></div>
+    <div class="production-boundary"><span>SALES VIEW</span><strong>Demand originates from an exact Sales Order line.</strong><p>Production Control owns acceptance, committed dates, priority, assignment, and release. This public sandbox simulates those permissions; the internal endpoint enforces them server-side.</p></div>
+    <div class="order-metric-grid">
+      <div><span>Waiting on gatekeeper</span><strong>${waiting}</strong></div>
+      <div><span>Active production</span><strong>${active}</strong></div>
+      <div><span>Needs information</span><strong>${requests.filter((request) => request.status === "Returned").length}</strong></div>
+      <div><span>Completed</span><strong>${completed}</strong></div>
+    </div>
+    ${renderBuildRequestEditor()}
+    <section class="request-card-list">${requests.map((request) => buildRequestCardHtml(request, "sales")).join("") || '<div class="request-empty-state"><strong>No Build Requests yet.</strong><p>Start from a Sales Order line when customer demand requires an in-house build.</p></div>'}</section>
+  </div>`;
+}
+
+function renderProductionControlWorkspace() {
+  const requests = [...state.buildRequests].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  const waiting = requests.filter((request) => request.status === "Submitted");
+  const active = requests.filter((request) => request.status === "Accepted");
+  const exceptions = active.filter((request) => Boolean(buildForRequest(request)?.exceptionCode));
+  const dueSoon = active.filter((request) => {
+    const due = buildForRequest(request)?.committedDueDate;
+    return due && new Date(due).getTime() - Date.now() <= 5 * 86400000;
+  });
+  elements.overlayBody.innerHTML = `<div class="workbench production-workbench gatekeeper-workbench">
+    <div class="operations-toolbar"><div><strong>Production Control</strong><span>The gatekeeper reviews every request before production work exists or reaches the shop.</span></div><button type="button" class="secondary-button" data-production-open-builds>Open Build Order Board</button></div>
+    <div class="production-boundary is-controller"><span>GATEKEEPER VIEW</span><strong>Production Control is the single release authority.</strong><p>Accept or return demand, commit completion dates, assign the shop, set priority, and release only after the build plan is ready.</p></div>
+    <div class="order-metric-grid">
+      <div><span>Awaiting decision</span><strong>${waiting.length}</strong></div>
+      <div><span>Accepted work</span><strong>${active.length}</strong></div>
+      <div><span>Due in 5 days</span><strong>${dueSoon.length}</strong></div>
+      <div><span>Exceptions</span><strong>${exceptions.length}</strong></div>
+    </div>
+    <section class="production-queue-section"><header><div><span>01</span><h3>Gatekeeper Inbox</h3></div><p>Nothing becomes shop work until one of these receives a commitment.</p></header><div class="request-card-list">${waiting.map((request) => buildRequestCardHtml(request, "controller")).join("") || '<div class="request-empty-state"><strong>Inbox clear.</strong><p>No Sales requests are waiting for a decision.</p></div>'}</div></section>
+    <section class="production-queue-section"><header><div><span>02</span><h3>Committed Work</h3></div><p>Accepted requests remain tied to their controlled Build Orders.</p></header><div class="request-card-list">${active.map((request) => buildRequestCardHtml(request, "controller")).join("") || '<div class="request-empty-state"><strong>No committed work.</strong></div>'}</div></section>
+  </div>`;
+}
+
 function sortedBuildsByStatus(status) {
   return state.builds.filter((build) => build.status === status).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
@@ -2569,7 +3215,10 @@ function renderBuildListSection(title, builds, sectionKey) {
       <span>${escapeHTML(title)} (${builds.length})</span><span class="quote-list-caret">${open ? "▾" : "▸"}</span>
     </button>
     ${open ? (builds.length
-      ? `<div class="quote-list-rows">${builds.map((build) => `<button type="button" class="quote-list-row order-list-row" data-build-open="${build.id}"><span><strong>${escapeHTML(build.part || "No item selected")}</strong><small>${escapeHTML(build.buildNumber || "Pending #")} · ${escapeHTML(build.description || "")}</small></span><span><b class="order-status-pill is-${build.status === "Finished" ? "closed" : build.status.toLowerCase()}">${escapeHTML(build.status)}</b><small>${build.builtQty}/${build.quantity} built</small></span></button>`).join("")}</div>`
+      ? `<div class="quote-list-rows">${builds.map((build) => {
+        const request = state.buildRequests.find((entry) => entry.id === build.buildRequestId);
+        return `<button type="button" class="quote-list-row order-list-row" data-build-open="${build.id}"><span><strong>${escapeHTML(build.part || "No item selected")}</strong><small>${escapeHTML(build.buildNumber || "Pending #")}${request ? ` · ${escapeHTML(request.requestNumber)}` : " · Internal build"} · ${escapeHTML(build.description || "")}</small></span><span><b class="order-status-pill is-${build.status === "Finished" ? "closed" : build.status.toLowerCase()}">${escapeHTML(build.status)}</b><small>${escapeHTML(build.shopAssigneeName || "Unassigned")} · ${build.builtQty}/${build.quantity} built</small></span></button>`;
+      }).join("")}</div>`
       : `<p class="quote-list-empty">No ${escapeHTML(title.toLowerCase())}.</p>`) : ""}
   </section>`;
 }
@@ -2578,9 +3227,15 @@ function renderBuildsWorkspace() {
   const openBuilds = sortedBuildsByStatus("Open");
   const releasedBuilds = sortedBuildsByStatus("Released");
   const finishedBuilds = sortedBuildsByStatus("Finished");
+  const cancelledBuilds = sortedBuildsByStatus("Cancelled");
   const inProgress = releasedBuilds.filter((build) => Number(build.builtQty) > 0).length;
-  elements.overlayBody.innerHTML = `<div class="workbench quotes-workbench">
-    <div class="operations-toolbar"><div><strong>Build Orders</strong><span>${isPublicDemo ? "Portfolio sandbox — changes stay on this device and are never sent to GP." : state.buildsBackendConfigured ? "Synced live across the team — not sent to GP." : "Browser-local only right now — not yet synced across devices, not sent to GP."}</span></div><button type="button" class="primary-button" data-build-new>Start New Build Order</button></div>
+  const role = productionActor(state.buildWorkspaceRole);
+  elements.overlayBody.innerHTML = `<div class="workbench quotes-workbench production-workbench">
+    <div class="operations-toolbar"><div><strong>Build Orders</strong><span>${isPublicDemo ? "Portfolio sandbox — changes stay on this device and are never sent to GP." : state.buildsBackendConfigured ? "Synced live across the team — not sent to GP." : "Browser-local only right now — not yet synced across devices, not sent to GP."}</span></div>${canControlBuild() ? '<button type="button" class="primary-button" data-build-new>New Internal Build</button>' : ""}</div>
+    <div class="build-role-switch" aria-label="Build Order demonstration role"><div><span>ACTIVE WORK VIEW</span><strong>${escapeHTML(role.name)}</strong></div><div>${[
+      ["production_controller", "Production Control"], ["shop", "Shop Floor"], ["sales", "Sales Tracking"],
+    ].map(([value, label]) => `<button type="button" data-build-role="${value}" class="${state.buildWorkspaceRole === value ? "is-active" : ""}">${label}</button>`).join("")}</div></div>
+    <div class="production-boundary ${canControlBuild() ? "is-controller" : ""}"><span>${canControlBuild() ? "CONTROL AUTHORITY" : state.buildWorkspaceRole === "shop" ? "EXECUTION VIEW" : "READ-ONLY VIEW"}</span><strong>${canControlBuild() ? "Production Control owns the production plan and release." : state.buildWorkspaceRole === "shop" ? "The shop reports consumption and completed quantity." : "Sales can follow the lifecycle without editing controlled work."}</strong><p>${canControlBuild() ? "Commit dates, set priority, assign work, plan components, and release only when inventory is available." : state.buildWorkspaceRole === "shop" ? "Assignment and component demand stay locked; execution posts against reserved inventory." : "Status, commitments, exceptions, and activity remain visible from the originating request."}</p></div>
     <div class="order-metric-grid">
       <div><span>Open entry</span><strong>${openBuilds.length}</strong></div>
       <div><span>Released</span><strong>${releasedBuilds.length}</strong></div>
@@ -2590,6 +3245,7 @@ function renderBuildsWorkspace() {
     ${renderBuildListSection("Open for Entry", openBuilds, "open")}
     ${renderBuildListSection("Released to Shop", releasedBuilds, "released")}
     ${renderBuildListSection("Finished Builds", finishedBuilds, "finished")}
+    ${renderBuildListSection("Cancelled Builds", cancelledBuilds, "cancelled")}
   </div>`;
 }
 
@@ -2640,6 +3296,7 @@ function renderBuildComponentSearchResults() {
 function setBuildTarget(part, description, uom) {
   const build = activeBuild();
   if (!build) return;
+  if (!canControlBuild()) { showToast("Only Production Control can change the build plan"); return; }
   if (build.status !== "Open") { showToast("Reopen the build order to change what's being built"); return; }
   build.part = part || "";
   build.description = description || "";
@@ -2653,8 +3310,8 @@ function setBuildTarget(part, description, uom) {
 function addBuildComponent(part, description, uom) {
   const build = activeBuild();
   if (!build) return;
-  if (build.status === "Finished") { showToast("This build order is already finished"); return; }
-  build.components.push({ itemId: itemIdForPart(part), part: part || "", description: description || "", uom: uom || "EA", qtyRequired: 1, qtyConsumed: 0, qtyToConsume: 0 });
+  if (!canControlBuild() || build.status !== "Open") { showToast("Only Production Control can edit components before release"); return; }
+  build.components.push({ componentKey: newDocumentLineKey("build-component"), itemId: itemIdForPart(part), part: part || "", description: description || "", uom: uom || "EA", qtyRequired: 1, qtyReserved: 0, qtyConsumed: 0, qtyToConsume: 0 });
   touchBuild(build);
   showToast(`${part || "Component"} added`);
   renderBuildModal();
@@ -2662,16 +3319,17 @@ function addBuildComponent(part, description, uom) {
 
 function renderBuildComponents(build) {
   if (!build.components.length) return '<div class="quote-empty">No components yet. Search above to add raw stock or sub-parts.</div>';
-  const entryLocked = build.status !== "Open" ? "disabled" : "";
-  const consumeLocked = build.status !== "Released" ? "disabled" : "";
+  const entryLocked = build.status !== "Open" || !canControlBuild() ? "disabled" : "";
+  const consumeLocked = build.status !== "Released" || !canPostBuild() ? "disabled" : "";
   return build.components.map((line, index) => `<div class="build-line" data-line-index="${index}">
       <input class="line-input" data-line-field="part" value="${escapeHTML(line.part)}" aria-label="Component part number" ${entryLocked}>
       <input class="line-input line-description" data-line-field="description" value="${escapeHTML(line.description)}" aria-label="Description" ${entryLocked}>
       <input class="line-input line-uom" data-line-field="uom" value="${escapeHTML(line.uom || "EA")}" aria-label="Unit of measure" ${entryLocked}>
       <input class="line-input" type="number" min="0" step="1" data-line-field="qtyRequired" value="${line.qtyRequired}" aria-label="Quantity required" ${entryLocked}>
+      <span class="order-line-readout">${line.qtyReserved}</span>
       <span class="order-line-readout">${line.qtyConsumed}</span>
-      <input class="line-input" type="number" min="0" max="${line.qtyRequired - line.qtyConsumed}" step="1" data-line-field="qtyToConsume" value="${line.qtyToConsume || 0}" aria-label="Quantity to consume" ${consumeLocked}>
-      ${build.status === "Open" ? `<button class="line-remove" type="button" data-line-remove="${index}" aria-label="Remove component">×</button>` : "<span></span>"}
+      <input class="line-input" type="number" min="0" max="${line.qtyReserved}" step="1" data-line-field="qtyToConsume" value="${line.qtyToConsume || 0}" aria-label="Quantity to consume" ${consumeLocked}>
+      ${build.status === "Open" && canControlBuild() ? `<button class="line-remove" type="button" data-line-remove="${index}" aria-label="Remove component">×</button>` : "<span></span>"}
     </div>`).join("");
 }
 
@@ -2679,20 +3337,35 @@ function renderBuildModal() {
   const build = activeBuild();
   if (!build) return;
   const readiness = buildReadiness(build);
-  const editable = build.status === "Open";
+  const editable = build.status === "Open" && canControlBuild();
   const locked = editable ? "" : "disabled";
+  const executionEditable = build.status === "Released" && canPostBuild();
+  const notesLocked = (canControlBuild() || executionEditable) && build.status !== "Finished" ? "" : "disabled";
   const remaining = buildRemainingQty(build);
+  const request = state.buildRequests.find((entry) => entry.id === build.buildRequestId);
+  const role = productionActor(state.buildWorkspaceRole);
   const actionButtons = build.status === "Open"
-    ? `<button type="button" class="primary-button" data-build-release ${readiness.canRelease ? "" : "disabled"}>Release to Shop</button>`
+    ? canControlBuild()
+      ? `<button type="button" class="primary-button" data-build-release ${readiness.canRelease ? "" : "disabled"}>Reserve Components &amp; Release</button>`
+      : `<span class="order-closed-message">Waiting for Production Control to release this work.</span>`
     : build.status === "Released"
-      ? `<button type="button" class="secondary-button" data-build-reopen>Reopen</button><button type="button" class="primary-button" data-build-post>Post Build Progress</button>`
-      : '<span class="order-closed-message">Build quantity fully completed.</span>';
+      ? canControlBuild()
+        ? '<button type="button" class="secondary-button" data-build-reopen>Reopen &amp; Unreserve</button><button type="button" class="primary-button" data-build-post>Post Build Progress</button>'
+        : executionEditable
+          ? '<button type="button" class="primary-button" data-build-post>Post Build Progress</button>'
+          : '<span class="order-closed-message">Tracking released shop work — read only.</span>'
+      : build.status === "Finished"
+        ? '<span class="order-closed-message">Build quantity fully completed.</span>'
+        : '<span class="order-closed-message">This Build Order is cancelled.</span>';
   const timeline = build.events.length ? build.events.map((event) => `<div class="order-event"><span class="order-event-dot"></span><div><strong>${escapeHTML(event.summary)}</strong><span>${escapeHTML(event.detail || "")}</span><small>${new Date(event.createdAt).toLocaleString()}${event.actorName ? ` · ${escapeHTML(event.actorName)}` : ""}</small></div></div>`).join("") : '<p class="quote-list-empty">No activity recorded yet.</p>';
   elements.buildModalTitle.textContent = `${build.buildNumber || "New Build Order"} — ${build.part || "No item selected"}`;
   elements.buildModalBody.innerHTML = `<div class="quote-context"><div><span>Build Order</span><strong>${escapeHTML(build.part || "No item selected")}</strong>${build.description ? `<small>${escapeHTML(build.description)}</small>` : ""}</div>
       <span class="order-status-pill is-${build.status === "Finished" ? "closed" : build.status.toLowerCase()}">${escapeHTML(build.status)}</span>
     </div>
+    <div class="build-modal-role"><span>Viewing as</span><strong>${escapeHTML(role.name)}</strong><small>${canControlBuild() ? "Plan and release authority" : state.buildWorkspaceRole === "sales" ? "Lifecycle tracking only" : "Execution reporting"}</small></div>
     <p class="quote-attribution">Originated by ${escapeHTML(build.originatorName || "Unknown")}${build.originatorInitials ? ` (${escapeHTML(build.originatorInitials)})` : ""} · Last edited by ${escapeHTML(build.lastModifiedByName || "Unknown")} ${build.lastModifiedAt ? new Date(build.lastModifiedAt).toLocaleString() : ""}</p>
+    ${request ? `<div class="request-build-source"><span>Demand source</span><strong>${escapeHTML(request.requestNumber)} · ${escapeHTML(requestSourceLabel(request))}</strong><small>${escapeHTML(request.originatorName)} requested ${request.requestedQuantity} ${escapeHTML(request.uom || "EA")} for ${escapeHTML(request.requestedShipDate || "an unspecified need date")}.</small></div>` : '<div class="request-build-source"><span>Demand source</span><strong>Internal Production Control build</strong><small>No Sales Build Request is attached.</small></div>'}
+    ${build.exceptionDetail ? `<div class="request-exception"><strong>${escapeHTML(build.exceptionCode === "customer_change" ? "Customer change requires review" : "Production exception")}</strong><span>${escapeHTML(build.exceptionDetail)}</span></div>` : ""}
     <div class="order-action-bar">${actionButtons}</div>
     <div class="order-readiness ${readiness.missing.length ? "has-warning" : "is-ready"}"><strong>${readiness.missing.length ? "Before release" : build.status === "Open" ? "Ready to release" : "Build status"}</strong><span>${readiness.missing.length ? `Add ${escapeHTML(readiness.missing.join(", "))}.` : `${build.builtQty}/${build.quantity} ${escapeHTML(build.uom || "EA")} built${remaining ? ` · ${remaining} remaining` : " · complete"}`}</span></div>
     ${editable ? `<div class="quote-search-wrap">
@@ -2703,30 +3376,35 @@ function renderBuildModal() {
       <section class="quote-form">
         <div class="quote-fields">
           <label class="field"><span>Quantity to build</span><input type="number" min="1" max="5000" step="1" data-build-meta-field="quantity" value="${build.quantity}" ${locked}></label>
-          <label class="field"><span>Due Date</span><input type="date" data-build-meta-field="dueDate" value="${escapeHTML(build.dueDate || "")}" ${locked}></label>
+          <label class="field"><span>Committed completion</span><input type="date" data-build-meta-field="committedDueDate" value="${escapeHTML(build.committedDueDate || "")}" ${locked}></label>
+          <label class="field"><span>Customer need date</span><input type="date" value="${escapeHTML(build.requestedDueDate || "")}" disabled></label>
+          <label class="field"><span>Priority</span><select data-build-meta-field="priority" ${locked}>${[1, 2, 3, 4, 5].map((priority) => `<option value="${priority}" ${Number(build.priority) === priority ? "selected" : ""}>${priority}${priority === 1 ? " · Rush" : priority === 5 ? " · Lowest" : ""}</option>`).join("")}</select></label>
+          <label class="field"><span>Shop assignment</span><select data-build-meta-field="shopAssigneeName" ${locked}><option value="">Choose a cell...</option>${productionShopAssignments.map((name) => `<option ${build.shopAssigneeName === name ? "selected" : ""}>${escapeHTML(name)}</option>`).join("")}</select></label>
           <label class="field"><span>Location</span><input data-build-meta-field="locationCode" value="${escapeHTML(build.locationCode || "MAIN")}" ${locked}></label>
         </div>
         <div class="order-lines ${build.components.length ? "" : "is-empty"}">
           <h3>Components</h3>
-          ${build.status !== "Finished" ? `<div class="quote-search-wrap">
+          ${editable ? `<div class="quote-search-wrap">
             <label class="field"><span>Search the Item Master for raw stock or sub-parts</span><input type="text" id="buildComponentSearchInput" autocomplete="off" spellcheck="false" placeholder="Part number or description..." value="${escapeHTML(state.buildComponentSearchTerm)}"></label>
             <div id="buildComponentSearchResults" class="quote-search-results"></div>
           </div>` : ""}
-          ${build.components.length ? '<div class="build-line build-line--header"><span>Part</span><span>Description</span><span>UOM</span><span>Required</span><span>Consumed</span><span>To Consume</span><span></span></div>' : ""}
+          ${build.components.length ? '<div class="build-line build-line--header"><span>Part</span><span>Description</span><span>UOM</span><span>Required</span><span>Reserved</span><span>Consumed</span><span>To Consume</span><span></span></div>' : ""}
           <div id="buildComponentRows">${renderBuildComponents(build)}</div>
         </div>
-        <label class="field quote-notes"><span>Shop notes</span><textarea data-build-meta-field="notes" rows="4" ${build.status === "Finished" ? "disabled" : ""}>${escapeHTML(build.notes)}</textarea></label>
+        <label class="field quote-notes"><span>Production / shop notes</span><textarea data-build-meta-field="notes" rows="4" ${notesLocked}>${escapeHTML(build.notes)}</textarea></label>
       </section>
       <aside class="quote-summary"><h3>Progress</h3>
         <div class="summary-row"><span>Target quantity</span><strong>${build.quantity} ${escapeHTML(build.uom || "EA")}</strong></div>
         <div class="summary-row"><span>Built so far</span><strong>${build.builtQty} ${escapeHTML(build.uom || "EA")}</strong></div>
-        ${build.status === "Released" ? `<label class="summary-input"><span>Qty to finish this pass</span><input type="number" min="0" max="${remaining}" step="1" data-build-meta-field="qtyToFinish" value="${build.qtyToFinish || 0}"></label>` : ""}
+        <div class="summary-row"><span>Assigned shop</span><strong>${escapeHTML(build.shopAssigneeName || "Not assigned")}</strong></div>
+        <div class="summary-row"><span>Committed</span><strong>${escapeHTML(build.committedDueDate || "Not committed")}</strong></div>
+        ${executionEditable ? `<label class="summary-input"><span>Qty to finish this pass</span><input type="number" min="0" max="${remaining}" step="1" data-build-meta-field="qtyToFinish" value="${build.qtyToFinish || 0}"></label>` : ""}
         <p class="quote-state">${isPublicDemo ? "Portfolio sandbox: edits stay only in this browser." : "Every edit here saves and is visible to the whole team."}</p>
       </aside>
     </div>
     <section class="order-timeline"><h3>Build Activity</h3>${timeline}</section>`;
   if (editable) renderBuildTargetSearchResults();
-  if (build.status !== "Finished") renderBuildComponentSearchResults();
+  if (editable) renderBuildComponentSearchResults();
 }
 
 function reportsChangeLabel(current, previous) {
@@ -2824,7 +3502,7 @@ function addOrderLine(part, description, price = 0, source = "MDB demo", categor
   const order = activeOrder();
   if (!order) { showToast("Open an order first"); return; }
   if (order.status !== "Open") { showToast("Reopen the order before adding items"); return; }
-  const line = { itemId: itemIdForPart(part), part: part || "", description: description || "", category, uom: "EA", quantity: 1, reservedQty: 0, qtyToShip: 0, shippedQty: 0, qtyToInvoice: 0, invoicedQty: 0, backorderQty: 0, unitPrice: Number(price) || 0, discount: 0, taxable: false, source };
+  const line = { lineKey: newDocumentLineKey("order-line"), itemId: itemIdForPart(part), part: part || "", description: description || "", category, uom: "EA", quantity: 1, reservedQty: 0, qtyToShip: 0, shippedQty: 0, qtyToInvoice: 0, invoicedQty: 0, backorderQty: 0, unitPrice: Number(price) || 0, discount: 0, taxable: false, source };
   order.lines.push(line);
   applyLineQuantity(line, 1, (accepted) => {
     if (!accepted) { order.lines.pop(); return; }
@@ -3650,6 +4328,11 @@ elements.overlayBody.addEventListener("change", async (event) => {
 });
 
 elements.overlayBody.addEventListener("submit", (event) => {
+  if (event.target.id === "buildRequestForm") {
+    event.preventDefault();
+    createBuildRequestFromForm(event.target);
+    return;
+  }
   if (event.target.id === "rigSalesOpportunityForm") {
     event.preventDefault();
     const values = new FormData(event.target);
@@ -3684,6 +4367,43 @@ elements.overlayBody.addEventListener("keydown", (event) => {
 });
 
 elements.overlayBody.addEventListener("click", (event) => {
+  if (event.target.closest("[data-request-new]")) { state.buildRequestEditorOpen = true; state.buildRequestFormError = ""; renderBuildRequestsWorkspace(); $("#buildRequestForm select[name='sourceLine']")?.focus(); return; }
+  if (event.target.closest("[data-request-editor-close]")) { state.buildRequestEditorOpen = false; state.buildRequestFormError = ""; renderBuildRequestsWorkspace(); return; }
+  if (event.target.closest("[data-request-open-orders]")) { openWorkspace("orders"); return; }
+  if (event.target.closest("[data-production-open-builds]")) { state.buildWorkspaceRole = "production_controller"; openWorkspace("builds"); return; }
+  const requestAccept = event.target.closest("[data-request-accept]");
+  if (requestAccept) {
+    const request = state.buildRequests.find((entry) => entry.id === requestAccept.dataset.requestAccept);
+    const card = requestAccept.closest("[data-request-card]");
+    if (request && card) acceptBuildRequest(request, {
+      committedDueDate: card.querySelector(`[data-request-due="${request.id}"]`)?.value,
+      priority: card.querySelector(`[data-request-priority="${request.id}"]`)?.value,
+      shopAssigneeName: card.querySelector(`[data-request-assignee="${request.id}"]`)?.value,
+    });
+    return;
+  }
+  const requestReturn = event.target.closest("[data-request-return]");
+  if (requestReturn) {
+    const request = state.buildRequests.find((entry) => entry.id === requestReturn.dataset.requestReturn);
+    const note = requestReturn.closest("[data-request-card]")?.querySelector(`[data-request-note="${request?.id}"]`)?.value;
+    if (request) returnBuildRequest(request, note);
+    return;
+  }
+  const requestResubmit = event.target.closest("[data-request-resubmit]");
+  if (requestResubmit) { const request = state.buildRequests.find((entry) => entry.id === requestResubmit.dataset.requestResubmit); if (request) resubmitBuildRequest(request); return; }
+  const requestCancel = event.target.closest("[data-request-cancel]");
+  if (requestCancel) { const request = state.buildRequests.find((entry) => entry.id === requestCancel.dataset.requestCancel); if (request) cancelBuildRequest(request); return; }
+  const requestChange = event.target.closest("[data-request-change]");
+  if (requestChange) { const request = state.buildRequests.find((entry) => entry.id === requestChange.dataset.requestChange); if (request) requestBuildChange(request); return; }
+  const requestOpenBuild = event.target.closest("[data-request-open-build]");
+  if (requestOpenBuild) {
+    const request = state.buildRequests.find((entry) => entry.id === requestOpenBuild.dataset.requestOpenBuild);
+    const build = request ? buildForRequest(request) : null;
+    if (build) { state.buildWorkspaceRole = requestOpenBuild.dataset.requestOpenBuildRole || "sales"; openBuildModal(build.id); }
+    return;
+  }
+  const buildRole = event.target.closest("[data-build-role]");
+  if (buildRole) { state.buildWorkspaceRole = buildRole.dataset.buildRole; renderBuildsWorkspace(); return; }
   const itemResult = event.target.closest("[data-item-part]");
   if (itemResult) { state.itemView.selectedPart = itemResult.dataset.itemPart; $$(".item-result").forEach((button) => button.classList.toggle("is-selected", button === itemResult)); renderItemDetail(state.itemView.selectedPart); return; }
   const itemTooling = event.target.closest("[data-item-open-tooling]");
@@ -3793,6 +4513,7 @@ elements.overlayBody.addEventListener("click", (event) => {
   const orderOpen = event.target.closest("[data-order-open]");
   if (orderOpen) { openOrderModal(orderOpen.dataset.orderOpen); return; }
   if (event.target.closest("[data-build-new]")) {
+    if (!canControlBuild()) { showToast("Only Production Control can create controlled Build Orders"); return; }
     requireIdentity(() => {
       const build = newBuild();
       state.builds.unshift(build);
@@ -3986,7 +4707,7 @@ elements.orderModalBody.addEventListener("click", (event) => {
   if (event.target.closest("[data-order-post-invoice]")) { requireIdentity(() => postOrderInvoice(order)); return; }
   if (event.target.closest("[data-order-add-line]")) {
     if (order.status !== "Open") return;
-    order.lines.push({ part: "", description: "", uom: "EA", quantity: 1, reservedQty: 0, qtyToShip: 0, shippedQty: 0, qtyToInvoice: 0, invoicedQty: 0, backorderQty: 0, unitPrice: 0, discount: 0, taxable: false, source: "Manual" });
+    order.lines.push({ lineKey: newDocumentLineKey("order-line"), part: "", description: "", uom: "EA", quantity: 1, reservedQty: 0, qtyToShip: 0, shippedQty: 0, qtyToInvoice: 0, invoicedQty: 0, backorderQty: 0, unitPrice: 0, discount: 0, taxable: false, source: "Manual" });
     touchOrder(order);
     renderOrderModal();
     return;
@@ -4021,14 +4742,21 @@ elements.buildModalBody.addEventListener("input", (event) => {
   if (target.matches("[data-build-meta-field]")) {
     const field = target.dataset.buildMetaField;
     if (field === "qtyToFinish") {
-      if (build.status !== "Released") return;
+      if (build.status !== "Released" || !canPostBuild()) return;
       build.qtyToFinish = Math.min(Math.max(0, Math.floor(Number(target.value) || 0)), buildRemainingQty(build));
       target.value = build.qtyToFinish;
       touchBuild(build);
       return;
     }
-    if (build.status !== "Open" && field !== "notes") return;
-    build[field] = field === "quantity" ? clampQuantity(target.value) : target.value;
+    if (field === "notes") {
+      if ((!canControlBuild() && !canPostBuild()) || build.status === "Finished") return;
+      build.notes = target.value;
+      touchBuild(build);
+      return;
+    }
+    if (build.status !== "Open" || !canControlBuild()) return;
+    build[field] = field === "quantity" ? clampQuantity(target.value) : field === "priority" ? Math.min(5, Math.max(1, Number(target.value) || 3)) : target.value;
+    if (field === "committedDueDate") build.dueDate = build.committedDueDate;
     if (field === "quantity" && String(target.value) !== String(build.quantity)) target.value = build.quantity;
     touchBuild(build);
     return;
@@ -4038,16 +4766,19 @@ elements.buildModalBody.addEventListener("input", (event) => {
     const line = build.components[Number(row.dataset.lineIndex)];
     const field = target.dataset.lineField;
     if (field === "qtyToConsume") {
-      if (build.status !== "Released") return;
-      line.qtyToConsume = Math.min(Math.max(0, Math.floor(Number(target.value) || 0)), line.qtyRequired - line.qtyConsumed);
+      if (build.status !== "Released" || !canPostBuild()) return;
+      line.qtyToConsume = Math.min(Math.max(0, Math.floor(Number(target.value) || 0)), Number(line.qtyReserved), line.qtyRequired - line.qtyConsumed);
       target.value = line.qtyToConsume;
     } else {
-      if (build.status !== "Open") return;
+      if (build.status !== "Open" || !canControlBuild()) return;
       line[field] = field === "qtyRequired" ? Math.max(0, Number(target.value) || 0) : target.value;
       if (field === "part") line.itemId = itemIdForPart(line.part);
     }
     touchBuild(build);
   }
+});
+elements.buildModalBody.addEventListener("change", (event) => {
+  if (event.target.matches("select[data-build-meta-field]")) event.target.dispatchEvent(new Event("input", { bubbles: true }));
 });
 elements.buildModalBody.addEventListener("click", (event) => {
   const build = activeBuild();
@@ -4056,7 +4787,7 @@ elements.buildModalBody.addEventListener("click", (event) => {
   if (event.target.closest("[data-build-reopen]")) { requireIdentity(() => reopenBuild(build)); return; }
   if (event.target.closest("[data-build-post]")) { requireIdentity(() => postBuild(build)); return; }
   const remove = event.target.closest("[data-line-remove]");
-  if (remove) { if (build.status !== "Open") return; build.components.splice(Number(remove.dataset.lineRemove), 1); touchBuild(build); renderBuildModal(); return; }
+  if (remove) { if (build.status !== "Open" || !canControlBuild()) return; build.components.splice(Number(remove.dataset.lineRemove), 1); touchBuild(build); renderBuildModal(); return; }
   const targetSelect = event.target.closest("[data-build-target-select-part]");
   if (targetSelect) { setBuildTarget(targetSelect.dataset.buildTargetSelectPart, targetSelect.dataset.buildTargetSelectDescription, targetSelect.dataset.buildTargetSelectUom); return; }
   const componentAdd = event.target.closest("[data-build-component-add-part]");

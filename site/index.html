@@ -9,8 +9,8 @@
     >
     <meta name="mdb-app-mode" content="public-demo">
     <title>Mobile Drill Brain</title>
-    <link rel="stylesheet" href="styles.css?v=20260818-4">
-    <script src="app.js?v=20260818-4" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260821-1">
+    <script src="app.js?v=20260821-1" defer></script>
   </head>
 
   <body class="is-access-locked">
@@ -60,9 +60,15 @@
         <button type="button" data-open="tooling"><span class="workspace-nav-icon" aria-hidden="true">T</span><span>Tooling</span></button>
         <button type="button" data-open="quotes"><span class="workspace-nav-icon" aria-hidden="true">Q</span><span>Quotes</span></button>
         <button type="button" data-open="orders"><span class="workspace-nav-icon" aria-hidden="true">O</span><span>Orders</span></button>
-        <button type="button" data-open="builds"><span class="workspace-nav-icon" aria-hidden="true">BLD</span><span>Build Orders</span></button>
         <button type="button" data-open="inventory"><span class="workspace-nav-icon" aria-hidden="true">I</span><span>Inventory</span></button>
         <button type="button" data-open="bom"><span class="workspace-nav-icon" aria-hidden="true">B</span><span>Rig / BOM</span></button>
+      </div>
+
+      <div class="workspace-nav-group">
+        <strong>Production</strong>
+        <button type="button" data-open="buildRequests"><span class="workspace-nav-icon" aria-hidden="true">BR</span><span>Build Requests</span></button>
+        <button type="button" data-open="productionControl"><span class="workspace-nav-icon" aria-hidden="true">PC</span><span>Production Control</span></button>
+        <button type="button" data-open="builds"><span class="workspace-nav-icon" aria-hidden="true">BLD</span><span>Build Orders</span></button>
       </div>
 
       <div class="workspace-nav-group">
@@ -120,6 +126,14 @@
               <button type="button" data-open="orders"><span class="quick-icon" aria-hidden="true">O</span><span>Orders</span></button>
               <button type="button" data-open="inventory"><span class="quick-icon quick-icon--inventory" aria-hidden="true"></span><span>Inventory</span></button>
               <button type="button" data-open="bom"><span class="quick-icon quick-icon--bom" aria-hidden="true"></span><span>Rig / BOM</span></button>
+            </nav>
+          </section>
+          <section>
+            <h2>Production</h2>
+            <nav class="quick-nav quick-nav--three" aria-label="Production workspaces">
+              <button type="button" data-open="buildRequests"><span class="quick-icon" aria-hidden="true">BR</span><span>Build Requests</span></button>
+              <button type="button" data-open="productionControl"><span class="quick-icon" aria-hidden="true">PC</span><span>Production Control</span></button>
+              <button type="button" data-open="builds"><span class="quick-icon" aria-hidden="true">BLD</span><span>Build Orders</span></button>
             </nav>
           </section>
           <section>
