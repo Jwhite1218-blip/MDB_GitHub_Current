@@ -11,6 +11,17 @@
     <title>Mobile Drill Brain</title>
     <link rel="stylesheet" href="styles.css?v=20260818-4">
     <script src="app.js?v=20260818-4" defer></script>
+      <link rel="manifest" href="manifest.webmanifest?v=shell-1">
+    <meta name="theme-color" content="#0a1815">
+    <link rel="apple-touch-icon" href="assets/app-icon-512.png">
+    <link rel="stylesheet" href="shell.css?v=shell-1">
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", function () {
+          navigator.serviceWorker.register("sw.js?v=shell-1").catch(function () {});
+        });
+      }
+    </script>
   </head>
 
   <body class="is-access-locked">
@@ -312,6 +323,7 @@
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+      <script src="shell.js?v=shell-1" defer></script>
   </body>
 </html>
 
