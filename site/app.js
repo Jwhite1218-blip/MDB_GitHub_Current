@@ -11,6 +11,8 @@ const productionDemoActors = {
   production_controller: { role: "production_controller", initials: "PC", name: "Production Controller", label: "Production Control" },
   shop: { role: "shop", initials: "SHOP", name: "Assigned Shop Employee", label: "Shop Floor" },
   inventory_controller: { role: "inventory_controller", initials: "INV", name: "Inventory Controller", label: "Inventory Control" },
+  service_controller: { role: "service_controller", initials: "SC", name: "Service Controller", label: "Service Control" },
+  service_technician: { role: "service_technician", initials: "TECH", name: "Service Technician", label: "Service Execution" },
 };
 const productionShopAssignments = ["Fabrication Cell A", "Assembly Cell B", "Weld Cell"];
 const feedbackAccessKey = "mdb-feedback-access-v1";
@@ -185,6 +187,22 @@ const state = {
   buildRequestEditorOpen: false,
   buildRequestFormError: "",
   buildWorkspaceRole: "production_controller",
+  serviceRequests: [],
+  serviceWorkOrders: [],
+  operationsJobs: [],
+  operationsJobAssignments: [],
+  operationsJobCheckpoints: [],
+  operationsCheckpointDefinitions: [],
+  serviceRequestEvents: [],
+  operationsJobEvents: [],
+  serviceSignoffs: [],
+  operationalUsers: [],
+  workCenters: [],
+  serviceRequestEditorOpen: false,
+  serviceRequestFormError: "",
+  operationsBoardRole: "service_controller",
+  operationsBackendConfigured: false,
+  operationsLoading: false,
   rigQuoteFiles: {},
   stock: {},
   touches: {},
@@ -543,6 +561,8 @@ const workspaceEntries = [
   ["Quote Builder", "Shared team quotes, GP-style layout", "quotes", "quote pricing estimate builder"],
   ["Orders", "Open orders, shipped and backorder tracking", "orders", "order orders open backorder shipped fulfillment"],
   ["Build Requests", "Sales demand sent to Production Control", "buildRequests", "build request production tracking sales demand"],
+  ["Service Requests", "Field and office service intake with lifecycle tracking", "serviceRequests", "service request field rig machine down warranty repair"],
+  ["Operations Board", "Combined gatekeeper queue, capacity, and exceptions", "operationsBoard", "operations gatekeeper service production schedule bay capacity exception"],
   ["Production Control", "Gatekeeper queue, commitments, and shop direction", "productionControl", "gatekeeper production schedule assign priority release"],
   ["Build Orders", "Controlled shop execution and finished output", "builds", "build manufacturing production order shop components"],
   ["Inventory", "Editable GP-field demo", "inventory", "inventory stock available on hand allocated bin price"],
@@ -676,6 +696,154 @@ function safeLoad(key, fallback) {
 
 function safeSave(key, value) {
   try { localStorage.setItem(storageKey(key), JSON.stringify(value)); } catch { /* demo still works without persistence */ }
+}
+
+function operationsSnapshot() {
+  return {
+    serviceRequests: state.serviceRequests,
+    serviceWorkOrders: state.serviceWorkOrders,
+    operationsJobs: state.operationsJobs,
+    operationsJobAssignments: state.operationsJobAssignments,
+    operationsJobCheckpoints: state.operationsJobCheckpoints,
+    operationsCheckpointDefinitions: state.operationsCheckpointDefinitions,
+    serviceRequestEvents: state.serviceRequestEvents,
+    operationsJobEvents: state.operationsJobEvents,
+    serviceSignoffs: state.serviceSignoffs,
+    operationalUsers: state.operationalUsers,
+    workCenters: state.workCenters,
+  };
+}
+
+function applyOperationsSnapshot(snapshot = {}) {
+  for (const key of Object.keys(operationsSnapshot())) {
+    state[key] = Array.isArray(snapshot[key]) ? snapshot[key] : [];
+  }
+}
+
+function saveOperationsSnapshot() {
+  if (isPublicDemo) safeSave("mdb-demo-operations-v2", operationsSnapshot());
+}
+
+function operationsDemoTimestamp(daysFromNow = 0, hour = 12) {
+  const date = new Date();
+  date.setDate(date.getDate() + daysFromNow);
+  date.setHours(hour, 0, 0, 0);
+  return date.toISOString();
+}
+
+function ensureOperationsDemo() {
+  if (!isPublicDemo || state.serviceRequests.length || state.operationsJobs.length) return;
+  state.workCenters = [
+    { id: "service-bay-1", code: "SB-01", name: "Service Bay 1", center_type: "service_bay", capacity: 1 },
+    { id: "service-bay-2", code: "SB-02", name: "Service Bay 2", center_type: "service_bay", capacity: 1 },
+    { id: "field-service-1", code: "FIELD", name: "Field Service", center_type: "field", capacity: 3 },
+    { id: "assembly-cell-b", code: "ASM-B", name: "Assembly Cell B", center_type: "build_bay", capacity: 1 },
+  ];
+  state.operationalUsers = [
+    { id: "demo-service-controller", display_name: "Service Controller", initials: "SC", operational_user_roles: [{ role: "service_controller" }] },
+    { id: "demo-service-technician", display_name: "Service Technician", initials: "TECH", operational_user_roles: [{ role: "service_technician" }] },
+  ];
+  state.serviceRequests = [
+    {
+      id: "demo-service-request-machine-down", request_number: "SRQ001001", source_channel: "Mobile",
+      requester_user_id: "demo-field-requester", requester_name: "Field Service Technician", urgency: "Machine Down",
+      customer_name_snapshot: "Midwest Geotechnical", service_location: "Fort Wayne, IN",
+      customer_contact_snapshot: "Site superintendent", asset_id: "RIG-B57-042", production_serial: "B57-2021-042",
+      rig_model: "B57", drill_hours: 2840, complaint: "Rotary head stopped under load; crew is shut down.",
+      requested_work: "Diagnose failure, identify required parts, and provide the fastest recovery path.",
+      financial_class: "Unknown", service_mode: "Field", status: "Submitted",
+      submitted_at: operationsDemoTimestamp(-1, 9), created_at: operationsDemoTimestamp(-1, 9), updated_at: operationsDemoTimestamp(-1, 9),
+    },
+    {
+      id: "demo-service-request-scheduled", request_number: "SRQ001000", source_channel: "Email",
+      requester_user_id: "demo-service-requester", requester_name: "Inside Service", urgency: "Priority",
+      gatekeeper_user_id: "demo-service-controller", customer_name_snapshot: "Atlas Environmental",
+      service_location: "MDB Service Shop", customer_contact_snapshot: "Fleet manager",
+      asset_id: "RIG-B37X-018", production_serial: "B37X-2019-018", rig_model: "B37X", drill_hours: 3915,
+      complaint: "Feed cylinder drifts after warm-up.", requested_work: "Inspect hydraulic circuit and repair confirmed cause.",
+      financial_class: "Billable", service_mode: "In House", status: "Converted",
+      submitted_at: operationsDemoTimestamp(-5, 10), triaged_at: operationsDemoTimestamp(-4, 9),
+      accepted_at: operationsDemoTimestamp(-4, 11), converted_at: operationsDemoTimestamp(-4, 13),
+      created_at: operationsDemoTimestamp(-5, 10), updated_at: operationsDemoTimestamp(-2, 14),
+    },
+  ];
+  state.operationsJobs = [{
+    id: "demo-service-job-scheduled", job_number: "OPJ001000", job_type: "service_job", status: "Scheduled",
+    title: "B37X-2019-018 · Hydraulic drift diagnosis", controller_user_id: "demo-service-controller",
+    assignee_user_id: "demo-service-technician", assignee_name: "Service Technician", priority: 2,
+    work_center_id: "service-bay-1", planned_start_at: operationsDemoTimestamp(1, 8),
+    committed_due_at: operationsDemoTimestamp(2, 16), gp_link_status: "Pending", exception_code: null,
+    exception_detail: "", created_at: operationsDemoTimestamp(-4, 13), updated_at: operationsDemoTimestamp(-2, 14),
+  }];
+  state.serviceWorkOrders = [{
+    id: "demo-service-work-order", work_order_number: "SWRK001000",
+    service_request_id: "demo-service-request-scheduled", operations_job_id: "demo-service-job-scheduled",
+    scope_version: 1, scope_summary: "Diagnose feed-cylinder drift, document cause, repair, test, and capture customer acceptance.",
+    created_at: operationsDemoTimestamp(-4, 13),
+  }];
+  state.operationsJobAssignments = [{
+    id: 1, job_id: "demo-service-job-scheduled", work_center_id: "service-bay-1", slot_number: 1,
+    starts_at: operationsDemoTimestamp(1, 8), ends_at: operationsDemoTimestamp(2, 16), revision: 1,
+    reason: "Customer delivery and bay availability", created_at: operationsDemoTimestamp(-2, 14), superseded_at: null,
+  }];
+  state.operationsJobCheckpoints = [
+    ["before_photos", "Before photos captured", "service_technician", "Complete", "Arrival condition documented."],
+    ["safety_functions", "Safety functions confirmed", "service_technician", "Complete", "Emergency and guarding checks recorded."],
+    ["service_inspection", "Inspection complete", "service_technician", "Pending", ""],
+    ["after_photos", "Repair evidence captured", "service_technician", "Pending", ""],
+    ["final_clean", "Final clean complete", "service_technician", "Pending", ""],
+    ["shipping_pickup", "Shipping or pickup ready", "service_controller", "Pending", ""],
+  ].map(([checkpoint_key, checkpoint_name, owner_role, status, evidence_note], index) => ({
+    job_id: "demo-service-job-scheduled", checkpoint_key, checkpoint_name, checkpoint_version: 1,
+    sequence: index + 1, owner_role, status, evidence_note, blocker_detail: "",
+  }));
+  state.serviceRequestEvents = [
+    { event_key: "demo-sre-1", service_request_id: "demo-service-request-machine-down", event_type: "Submitted", summary: "Submitted for service triage", detail: "Machine-down alert sent from mobile.", created_at: operationsDemoTimestamp(-1, 9) },
+    { event_key: "demo-sre-2", service_request_id: "demo-service-request-scheduled", event_type: "Converted", summary: "Service Work Order created", detail: "Request accepted and separated into controlled execution records.", created_at: operationsDemoTimestamp(-4, 13) },
+  ];
+  state.operationsJobEvents = [{
+    event_key: "demo-oje-1", job_id: "demo-service-job-scheduled", event_type: "Scheduled",
+    summary: "Service Bay 1 committed", detail: "Scheduled against bay capacity.", created_at: operationsDemoTimestamp(-2, 14),
+  }];
+  saveOperationsSnapshot();
+}
+
+async function loadOperations() {
+  if (isPublicDemo) {
+    applyOperationsSnapshot(safeLoad("mdb-demo-operations-v2", {}));
+    ensureOperationsDemo();
+    return;
+  }
+  state.operationsLoading = true;
+  try {
+    const response = await fetch("/api/operations/jobs", { headers: { Accept: "application/json" } });
+    if (!response.ok) throw new Error(`Operations API returned ${response.status}`);
+    const payload = await response.json();
+    applyOperationsSnapshot(payload);
+    state.operationsBackendConfigured = true;
+  } catch {
+    state.operationsBackendConfigured = false;
+  } finally {
+    state.operationsLoading = false;
+  }
+}
+
+async function postOperationsAction(payload) {
+  if (isPublicDemo) return null;
+  const response = await fetch("/api/operations/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || "The operations change was not accepted.");
+  await loadOperations();
+  return result;
+}
+
+function renderActiveOperationsWorkspace() {
+  if (state.activeWorkspace === "serviceRequests") renderServiceRequestsWorkspace();
+  if (state.activeWorkspace === "operationsBoard") renderOperationsBoardWorkspace();
 }
 
 function loadRigSalesOpportunities() {
@@ -1729,6 +1897,7 @@ async function loadData() {
     loadOrders(),
     loadBuilds(),
     loadItems(),
+    loadOperations(),
     rigQuoteFilesPromise,
   ]);
 
@@ -2120,7 +2289,7 @@ function openWorkspace(type, options = {}) {
   const customer = customers.find((item) => item.id === state.selectedCustomerId);
   elements.overlayEyebrow.textContent = type === "customerTooling" ? customer?.name || "Customer" : "MDB";
   const titles = {
-    items: "Items", tooling: "Tooling", customerTooling: "Customer Tooling", quotes: "Quote Builder", orders: "Orders", buildRequests: "Build Requests", productionControl: "Production Control", builds: "Build Orders", inventory: "Inventory", bom: "Rig / BOM View", rigSpecs: "Rig Specifications",
+    items: "Items", tooling: "Tooling", customerTooling: "Customer Tooling", quotes: "Quote Builder", orders: "Orders", buildRequests: "Build Requests", serviceRequests: "Service Requests", operationsBoard: "Operations Board", productionControl: "Production Control", builds: "Build Orders", inventory: "Inventory", bom: "Rig / BOM View", rigSpecs: "Rig Specifications",
     calibration: "Calibration", rigSales: "Rig Sales", prospects: "New Prospect Search", callList: "Daily Call List",
     calibrationTraining: "Calibration Training", workflowTraining: "Workflow Training",
     reports: "Sales Reports", systemSync: "System & Sync",
@@ -2139,6 +2308,8 @@ function openWorkspace(type, options = {}) {
   if (type === "quotes") { renderQuoteWorkspace(); if (state.quotesBackendConfigured) loadQuotes().then(() => { if (state.activeWorkspace === "quotes") renderQuoteWorkspace(); }); }
   if (type === "orders") { renderOrdersWorkspace(); if (state.ordersBackendConfigured) loadOrders().then(() => { if (state.activeWorkspace === "orders") renderOrdersWorkspace(); }); }
   if (type === "buildRequests") renderBuildRequestsWorkspace();
+  if (type === "serviceRequests") renderServiceRequestsWorkspace();
+  if (type === "operationsBoard") renderOperationsBoardWorkspace();
   if (type === "productionControl") renderProductionControlWorkspace();
   if (type === "builds") { renderBuildsWorkspace(); if (state.buildsBackendConfigured) loadBuilds().then(() => { if (state.activeWorkspace === "builds") renderBuildsWorkspace(); }); }
   if (type === "inventory") { renderInventoryWorkspace(options.query || ""); if (state.inventoryBackendConfigured) loadInventory(); }
@@ -3213,6 +3384,400 @@ function renderBuildRequestsWorkspace() {
     </div>
     ${renderBuildRequestEditor()}
     <section class="request-card-list">${requests.map((request) => buildRequestCardHtml(request, "sales")).join("") || '<div class="request-empty-state"><strong>No Build Requests yet.</strong><p>Start from a Sales Order line when customer demand requires an in-house build.</p></div>'}</section>
+  </div>`;
+}
+
+function serviceWorkOrderForRequest(request) {
+  return state.serviceWorkOrders.find((workOrder) => workOrder.service_request_id === request.id) || null;
+}
+
+function operationsJobForRequest(request) {
+  const workOrder = serviceWorkOrderForRequest(request);
+  return workOrder ? state.operationsJobs.find((job) => job.id === workOrder.operations_job_id) || null : null;
+}
+
+function serviceRequestForJob(job) {
+  const workOrder = state.serviceWorkOrders.find((entry) => entry.operations_job_id === job.id);
+  return workOrder ? state.serviceRequests.find((request) => request.id === workOrder.service_request_id) || null : null;
+}
+
+function operationDateTime(value) {
+  if (!value) return "Not scheduled";
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return String(value);
+  return date.toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function serviceRequestStage(request) {
+  if (request.status === "Cancelled") return "Cancelled";
+  if (request.status === "Resolved") return "Complete";
+  if (["Needs Information", "Returned"].includes(request.status)) return "Needs Information";
+  if (request.status === "Draft") return "Draft";
+  if (request.status === "Submitted") return "Waiting on Gatekeeper";
+  if (request.status === "Triaged") return "Triaged";
+  if (request.status === "Accepted") return "Accepted";
+  const job = operationsJobForRequest(request);
+  if (!job) return "Order Setup Pending";
+  if (job.exception_code === "blocked") return "Blocked";
+  if (job.exception_code === "on_hold") return "On Hold";
+  return {
+    Planning: "Order Setup Pending", "Order Setup Pending": "Order Setup Pending", Scheduled: "Scheduled",
+    Released: "Released", "In Progress": "Work in Progress", "Work Complete": "Work Complete",
+    "Signoff Complete": "Signoff Complete", Closed: "Complete", Cancelled: "Cancelled",
+  }[job.status] || job.status;
+}
+
+function serviceRequestStageIndex(request) {
+  const stage = serviceRequestStage(request);
+  if (["Draft", "Needs Information"].includes(stage)) return 0;
+  if (["Waiting on Gatekeeper", "Triaged"].includes(stage)) return 1;
+  if (["Accepted", "Order Setup Pending"].includes(stage)) return 2;
+  if (stage === "Scheduled") return 3;
+  if (["Released", "Work in Progress", "Blocked", "On Hold", "Work Complete", "Signoff Complete"].includes(stage)) return 4;
+  if (stage === "Complete") return 5;
+  return -1;
+}
+
+function serviceLifecycleHtml(request) {
+  const activeIndex = serviceRequestStageIndex(request);
+  const steps = ["Requested", "Gatekeeper", "Accepted", "Scheduled", "Service", "Closed"];
+  return `<div class="request-lifecycle" aria-label="Service Request lifecycle">${steps.map((step, index) => `<div class="${index < activeIndex ? "is-complete" : index === activeIndex ? "is-current" : ""}"><span>${index < activeIndex ? "✓" : index + 1}</span><small>${step}</small></div>`).join("")}</div>`;
+}
+
+function serviceRequestEventsHtml(request) {
+  const events = state.serviceRequestEvents.filter((event) => event.service_request_id === request.id)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  return events.slice(0, 8).map((event) => `<div class="request-event"><span></span><div><strong>${escapeHTML(event.summary)}</strong><small>${operationDateTime(event.created_at)} · ${escapeHTML(event.actor_name || "MDB workflow")}</small>${event.detail ? `<p>${escapeHTML(event.detail)}</p>` : ""}</div></div>`).join("") || '<p class="quote-list-empty">No request activity yet.</p>';
+}
+
+function serviceGatekeeperDecisionHtml(request) {
+  if (request.status === "Submitted") return `<div class="gatekeeper-decision">
+    <label class="gatekeeper-note"><span>Triage note / information needed</span><input data-service-note="${request.id}" placeholder="Record the decision context before routing..."></label>
+    <div class="button-row"><button type="button" class="secondary-button" data-service-transition="needs_information" data-service-request-id="${request.id}">Needs Information</button><button type="button" class="primary-button" data-service-transition="triage" data-service-request-id="${request.id}">Triage Request</button></div>
+  </div>`;
+  if (request.status === "Triaged") return `<div class="gatekeeper-decision">
+    <div class="gatekeeper-fields">
+      <label><span>Financial path</span><select data-service-financial="${request.id}">${["Unknown", "Warranty", "Billable"].map((value) => `<option ${value === request.financial_class ? "selected" : ""}>${value}</option>`).join("")}</select></label>
+      <label><span>Service mode</span><select data-service-mode="${request.id}">${["Unknown", "In House", "Field", "Outside"].map((value) => `<option ${value === request.service_mode ? "selected" : ""}>${value}</option>`).join("")}</select></label>
+      <label><span>Priority</span><select data-service-priority="${request.id}">${[1, 2, 3, 4, 5].map((value) => `<option value="${value}" ${value === 3 ? "selected" : ""}>${value}${value === 1 ? " · Rush" : ""}</option>`).join("")}</select></label>
+    </div>
+    <label class="gatekeeper-note"><span>Acceptance note</span><input data-service-note="${request.id}" placeholder="Classification, customer promise, or routing note..."></label>
+    <div class="button-row"><button type="button" class="secondary-button" data-service-transition="return" data-service-request-id="${request.id}">Return to Requester</button><button type="button" class="primary-button" data-service-transition="accept" data-service-request-id="${request.id}">Accept Request</button></div>
+  </div>`;
+  if (request.status === "Accepted") {
+    const eligibleAssignees = state.operationalUsers.filter((user) => (user.operational_user_roles || []).some((entry) => ["service_technician", "shop", "service_controller", "production_controller", "admin"].includes(entry.role)));
+    return `<div class="gatekeeper-decision"><strong>Acceptance is recorded. Execution does not exist yet.</strong><p>Conversion now creates a separate shared Operations Job and Service Work Order while preserving this request as the requester-facing record.</p><div class="gatekeeper-fields"><label><span>Initial service assignee</span><select data-service-assignee="${request.id}"><option value="">Assign during scheduling</option>${eligibleAssignees.map((user) => `<option value="${user.id}">${escapeHTML(user.display_name)}</option>`).join("")}</select></label></div><div class="button-row"><button type="button" class="primary-button" data-service-transition="convert" data-service-request-id="${request.id}">Create Controlled Work</button></div></div>`;
+  }
+  const workOrder = serviceWorkOrderForRequest(request);
+  const job = operationsJobForRequest(request);
+  return workOrder && job ? `<div class="request-build-link"><div><span>Controlled Service Work</span><strong>${escapeHTML(workOrder.work_order_number || workOrder.id)} · ${escapeHTML(job.job_number || job.id)}</strong><small>${escapeHTML(job.status)} · ${escapeHTML(job.assignee_name || "Assignment pending")} · GP link ${escapeHTML(job.gp_link_status || "Pending")}</small></div><button type="button" class="primary-button" data-open-operations-board>Open Operations Job</button></div>` : "";
+}
+
+function serviceRequestCardHtml(request, mode = "requester") {
+  const stage = serviceRequestStage(request);
+  const job = operationsJobForRequest(request);
+  const exception = request.returned_reason || job?.exception_detail || "";
+  const requesterActions = mode === "requester" ? `<div class="request-actions">
+    ${["Needs Information", "Returned"].includes(request.status) ? `<button type="button" class="primary-button" data-service-transition="submit" data-service-request-id="${request.id}">Resubmit to Gatekeeper</button>` : ""}
+    ${["Draft", "Submitted", "Needs Information", "Returned"].includes(request.status) ? `<button type="button" class="secondary-button" data-service-transition="cancel" data-service-request-id="${request.id}">Cancel Request</button>` : ""}
+  </div>` : "";
+  return `<article class="build-request-card service-request-card" data-service-request-card="${request.id}">
+    <header><div><span>${escapeHTML(request.request_number || request.id)} · ${escapeHTML(request.source_channel || "Desktop")}</span><h3>${escapeHTML(request.production_serial || request.asset_id || request.rig_model || "Service asset")}</h3><p>${escapeHTML(request.complaint || request.requested_work)}</p></div><b class="request-stage is-${slugify(stage)}">${escapeHTML(stage)}</b></header>
+    <div class="request-facts service-request-facts">
+      <div><span>Urgency</span><strong>${escapeHTML(request.urgency || "Routine")}</strong></div>
+      <div><span>Customer / location</span><strong>${escapeHTML(request.customer_name_snapshot || "Not supplied")} · ${escapeHTML(request.service_location || "Location pending")}</strong></div>
+      <div><span>Financial / mode</span><strong>${escapeHTML(request.financial_class || "Unknown")} · ${escapeHTML(request.service_mode || "Unknown")}</strong></div>
+      <div><span>Requester</span><strong>${escapeHTML(request.requester_name || "Signed-in employee")}</strong></div>
+    </div>
+    ${exception ? `<div class="request-exception"><strong>${escapeHTML(stage)}</strong><span>${escapeHTML(exception)}</span></div>` : ""}
+    ${serviceLifecycleHtml(request)}
+    ${mode === "controller" ? serviceGatekeeperDecisionHtml(request) : job ? `<div class="request-build-link"><div><span>Current commitment</span><strong>${escapeHTML(job.status)}</strong><small>${operationDateTime(job.planned_start_at)} → ${operationDateTime(job.committed_due_at)}</small></div><button type="button" class="primary-button" data-open-operations-board>Track Operations Job</button></div>` : ""}
+    ${requesterActions}
+    <details class="request-history"><summary>Request activity (${state.serviceRequestEvents.filter((event) => event.service_request_id === request.id).length})</summary>${serviceRequestEventsHtml(request)}</details>
+  </article>`;
+}
+
+function renderServiceRequestEditor() {
+  if (!state.serviceRequestEditorOpen) return "";
+  return `<section class="build-request-editor service-request-editor">
+    <header><div><span>SERVICE INTAKE</span><h3>Document a rig or field-service need</h3><p>Capture enough context for the office gatekeeper to classify and route the request. Submission does not create or promise work.</p></div><button type="button" class="close-button" data-service-editor-close aria-label="Close service form">×</button></header>
+    <form id="serviceRequestForm">
+      <label><span>Source</span><select name="sourceChannel"><option>Desktop</option><option>Mobile</option><option>NFC</option><option>Email</option></select></label>
+      <label><span>Urgency</span><select name="urgency"><option>Routine</option><option>Priority</option><option>Urgent</option><option>Machine Down</option><option>Safety</option></select></label>
+      <label><span>Rig model</span><input name="rigModel" placeholder="B57, B37X..."></label>
+      <label><span>Asset ID</span><input name="assetId" placeholder="Fleet or rig identifier"></label>
+      <label><span>Production serial</span><input name="productionSerial" placeholder="MDB production serial"></label>
+      <label><span>Drill hours</span><input name="drillHours" type="number" min="0" step="0.1"></label>
+      <label><span>Customer</span><input name="customerName" placeholder="Customer or internal owner"></label>
+      <label><span>Service location</span><input name="serviceLocation" placeholder="Site, city, or MDB shop"></label>
+      <label><span>Customer contact</span><input name="customerContact" placeholder="Name, phone, or email"></label>
+      <label class="is-wide"><span>Complaint / observed condition</span><textarea name="complaint" rows="3" placeholder="What happened, what is the machine doing, and what has already been checked?"></textarea></label>
+      <label class="is-wide"><span>Requested work / office help needed</span><textarea name="requestedWork" rows="3" placeholder="Parts identification, escalation, scheduling, diagnostic help, repair..."></textarea></label>
+      ${state.serviceRequestFormError ? `<p class="form-error is-wide">${escapeHTML(state.serviceRequestFormError)}</p>` : ""}
+      <div class="button-row is-wide"><button type="button" class="secondary-button" data-service-editor-close>Cancel</button><button type="submit" class="primary-button">Submit to Service Gatekeeper</button></div>
+    </form>
+  </section>`;
+}
+
+async function createServiceRequestFromForm(form) {
+  const values = new FormData(form);
+  const payload = Object.fromEntries(values.entries());
+  if (!String(payload.assetId || "").trim() && !String(payload.productionSerial || "").trim()) {
+    state.serviceRequestFormError = "Enter an Asset ID or production serial so the request stays tied to a real rig.";
+    renderServiceRequestsWorkspace();
+    return;
+  }
+  if (!String(payload.complaint || "").trim() && !String(payload.requestedWork || "").trim()) {
+    state.serviceRequestFormError = "Describe the observed condition or the work/help being requested.";
+    renderServiceRequestsWorkspace();
+    return;
+  }
+  try {
+    if (!isPublicDemo) {
+      await postOperationsAction({ operation: "create_service_request", ...payload, submit: true });
+    } else {
+      const request = {
+        id: `demo-service-${Date.now()}`, request_number: `SRQ${String(1000 + state.serviceRequests.length).padStart(6, "0")}`,
+        source_channel: payload.sourceChannel, requester_user_id: "demo-current-requester", requester_name: "Current Employee",
+        urgency: payload.urgency, customer_name_snapshot: String(payload.customerName || ""), service_location: String(payload.serviceLocation || ""),
+        customer_contact_snapshot: String(payload.customerContact || ""), asset_id: String(payload.assetId || ""),
+        production_serial: String(payload.productionSerial || ""), rig_model: String(payload.rigModel || ""),
+        drill_hours: payload.drillHours ? Number(payload.drillHours) : null, complaint: String(payload.complaint || ""),
+        requested_work: String(payload.requestedWork || ""), financial_class: "Unknown", service_mode: "Unknown",
+        status: "Submitted", submitted_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      };
+      state.serviceRequests.unshift(request);
+      state.serviceRequestEvents.unshift({ event_key: `sre-${Date.now()}`, service_request_id: request.id, event_type: "Submitted", summary: "Submitted for service triage", detail: "No work or customer promise has been created yet.", actor_name: "Current Employee", created_at: new Date().toISOString() });
+      saveOperationsSnapshot();
+    }
+    state.serviceRequestEditorOpen = false;
+    state.serviceRequestFormError = "";
+    renderServiceRequestsWorkspace();
+    showToast("Service Request submitted to the gatekeeper");
+  } catch (error) {
+    state.serviceRequestFormError = error.message;
+    renderServiceRequestsWorkspace();
+  }
+}
+
+async function transitionServiceRequest(request, action, card) {
+  const note = card?.querySelector(`[data-service-note="${CSS.escape(request.id)}"]`)?.value || "";
+  const financialClass = card?.querySelector(`[data-service-financial="${CSS.escape(request.id)}"]`)?.value || null;
+  const serviceMode = card?.querySelector(`[data-service-mode="${CSS.escape(request.id)}"]`)?.value || null;
+  const priority = Number(card?.querySelector(`[data-service-priority="${CSS.escape(request.id)}"]`)?.value || 3);
+  const assigneeUserId = card?.querySelector(`[data-service-assignee="${CSS.escape(request.id)}"]`)?.value || null;
+  try {
+    if (!isPublicDemo) {
+      await postOperationsAction({ operation: "transition_service_request", serviceRequestId: request.id, action, note, financialClass, serviceMode, priority, assigneeUserId });
+    } else {
+      const transition = {
+        submit: ["Submitted", "Submitted", "Resubmitted for service triage"],
+        needs_information: ["Needs Information", "NeedsInformation", "More information requested"],
+        return: ["Returned", "Returned", "Returned to requester"],
+        triage: ["Triaged", "Triaged", "Request triaged"],
+        accept: ["Accepted", "Accepted", "Service Request accepted"],
+        convert: ["Converted", "Converted", "Controlled service work created"],
+        cancel: ["Cancelled", "Cancelled", "Service Request cancelled"],
+      }[action];
+      if (!transition) return;
+      [request.status] = transition;
+      request.updated_at = new Date().toISOString();
+      if (action === "submit") { request.submitted_at = request.updated_at; request.returned_reason = ""; }
+      if (action === "cancel") request.cancelled_at = request.updated_at;
+      if (["needs_information", "return"].includes(action)) request.returned_reason = note || "Additional service context is required.";
+      if (action === "triage") request.triaged_at = request.updated_at;
+      if (action === "accept") {
+        request.accepted_at = request.updated_at;
+        request.financial_class = financialClass || request.financial_class;
+        request.service_mode = serviceMode || request.service_mode;
+      }
+      if (action === "convert") {
+        request.converted_at = request.updated_at;
+        const jobId = `demo-service-job-${Date.now()}`;
+        const workOrderId = `demo-service-work-${Date.now()}`;
+        state.operationsJobs.unshift({
+          id: jobId, job_number: `OPJ${String(1000 + state.operationsJobs.length).padStart(6, "0")}`, job_type: "service_job",
+          status: "Order Setup Pending", title: `${request.production_serial || request.asset_id} · ${request.complaint || request.requested_work}`,
+          controller_user_id: "demo-service-controller", assignee_user_id: assigneeUserId || null, assignee_name: state.operationalUsers.find((user) => user.id === assigneeUserId)?.display_name || "Assignment pending",
+          priority, work_center_id: null, planned_start_at: null, committed_due_at: null, gp_link_status: "Pending",
+          exception_code: null, exception_detail: "", created_at: request.updated_at, updated_at: request.updated_at,
+        });
+        state.serviceWorkOrders.unshift({ id: workOrderId, work_order_number: `SWRK${String(1000 + state.serviceWorkOrders.length).padStart(6, "0")}`, service_request_id: request.id, operations_job_id: jobId, scope_version: 0, scope_summary: "Scope pending controller review.", created_at: request.updated_at });
+        [
+          ["before_photos", "Before photos captured", "service_technician"], ["safety_functions", "Safety functions confirmed", "service_technician"],
+          ["service_inspection", "Inspection complete", "service_technician"], ["after_photos", "Repair evidence captured", "service_technician"],
+          ["final_clean", "Final clean complete", "service_technician"], ["shipping_pickup", "Shipping or pickup ready", "service_controller"],
+        ].forEach(([checkpoint_key, checkpoint_name, owner_role], index) => state.operationsJobCheckpoints.push({ job_id: jobId, checkpoint_key, checkpoint_name, checkpoint_version: 1, sequence: index + 1, owner_role, status: "Pending", evidence_note: "", blocker_detail: "" }));
+      }
+      state.serviceRequestEvents.unshift({ event_key: `sre-${Date.now()}`, service_request_id: request.id, event_type: transition[1], summary: transition[2], detail: note, actor_name: "Service Controller", created_at: new Date().toISOString() });
+      saveOperationsSnapshot();
+    }
+    renderActiveOperationsWorkspace();
+    showToast(`${request.request_number || "Service Request"} moved to ${request.status}`);
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+function renderServiceRequestsWorkspace() {
+  const requests = [...state.serviceRequests].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  const active = requests.filter((request) => !["Resolved", "Cancelled"].includes(request.status));
+  elements.overlayBody.innerHTML = `<div class="workbench production-workbench service-workbench">
+    <div class="operations-toolbar"><div><strong>Service Requests</strong><span>Fast intake and transparent tracking for office, field, and future Mobile Lite/NFC entry.</span></div><button type="button" class="primary-button" data-service-new>New Service Request</button></div>
+    <div class="production-boundary"><span>REQUESTER VIEW</span><strong>A request documents a need; it does not promise service work.</strong><p>The service gatekeeper owns triage, financial classification, mode, priority, assignment, scheduling, and conversion. Requesters can follow every controlled stage without editing the Service Work Order.</p></div>
+    <div class="order-metric-grid">
+      <div><span>Waiting on gatekeeper</span><strong>${requests.filter((request) => request.status === "Submitted").length}</strong></div>
+      <div><span>Needs information</span><strong>${requests.filter((request) => ["Needs Information", "Returned"].includes(request.status)).length}</strong></div>
+      <div><span>Controlled work</span><strong>${requests.filter((request) => request.status === "Converted").length}</strong></div>
+      <div><span>Open requests</span><strong>${active.length}</strong></div>
+    </div>
+    ${renderServiceRequestEditor()}
+    <section class="request-card-list">${requests.map((request) => serviceRequestCardHtml(request, "requester")).join("") || '<div class="request-empty-state"><strong>No Service Requests yet.</strong><p>Use one when a rig, field crew, or customer needs office-controlled service action.</p></div>'}</section>
+  </div>`;
+}
+
+function activeAssignmentForJob(job) {
+  return state.operationsJobAssignments.find((assignment) => assignment.job_id === job.id && !assignment.superseded_at) || null;
+}
+
+function operationJobCardHtml(job) {
+  const request = serviceRequestForJob(job);
+  const workOrder = request ? serviceWorkOrderForRequest(request) : null;
+  const assignment = activeAssignmentForJob(job);
+  const checkpoints = state.operationsJobCheckpoints.filter((checkpoint) => checkpoint.job_id === job.id)
+    .sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0));
+  const completed = checkpoints.filter((checkpoint) => ["Complete", "Waived"].includes(checkpoint.status)).length;
+  const centers = state.workCenters.filter((center) => center.center_type === "service_bay" || center.center_type === "field");
+  const eligibleAssignees = state.operationalUsers.filter((user) => (user.operational_user_roles || []).some((entry) => ["service_technician", "shop", "service_controller", "production_controller", "admin"].includes(entry.role)));
+  const controller = state.operationsBoardRole === "service_controller";
+  const technician = state.operationsBoardRole === "service_technician";
+  const scopeControls = controller && workOrder && Number(workOrder.scope_version || 0) < 1 ? `<div class="operations-scope-controls"><label><span>Controlled service scope</span><textarea data-job-scope="${job.id}" rows="3">${escapeHTML(request?.requested_work || request?.complaint || "")}</textarea></label><button type="button" class="primary-button" data-job-scope-save="${job.id}">Establish Version 1 Scope</button></div>` : "";
+  const scheduleControls = controller && Number(workOrder?.scope_version || 0) >= 1 && ["Planning", "Order Setup Pending"].includes(job.status) ? `<div class="operations-job-controls">
+    <label><span>Work center</span><select data-job-center="${job.id}">${centers.map((center) => `<option value="${center.id}">${escapeHTML(center.code)} · ${escapeHTML(center.name)} (${center.capacity} slot${Number(center.capacity) === 1 ? "" : "s"})</option>`).join("")}</select></label>
+    <label><span>Start</span><input type="datetime-local" data-job-start="${job.id}" value="${operationsDemoTimestamp(1, 8).slice(0, 16)}"></label>
+    <label><span>Committed due</span><input type="datetime-local" data-job-end="${job.id}" value="${operationsDemoTimestamp(2, 16).slice(0, 16)}"></label>
+    <label><span>Assignee</span><select data-job-assignee="${job.id}"><option value="">Keep current assignment</option>${eligibleAssignees.map((user) => `<option value="${user.id}" ${user.id === job.assignee_user_id ? "selected" : ""}>${escapeHTML(user.display_name)}</option>`).join("")}</select></label>
+    <button type="button" class="primary-button" data-job-action="schedule" data-job-id="${job.id}">Commit Schedule</button>
+  </div>` : "";
+  const gatekeeperActions = controller ? `<div class="request-actions operations-job-actions">
+    ${job.status === "Scheduled" ? `<button type="button" class="primary-button" data-job-action="release" data-job-id="${job.id}">Release to Technician</button>` : ""}
+    ${job.status === "Work Complete" && !state.serviceSignoffs.some((signoff) => signoff.service_work_order_id === workOrder?.id && signoff.party_type === "Internal") ? `<button type="button" class="secondary-button" data-job-signoff="Internal" data-job-id="${job.id}">Record Internal Signoff</button>` : ""}
+    ${job.status === "Work Complete" && !state.serviceSignoffs.some((signoff) => signoff.service_work_order_id === workOrder?.id && signoff.party_type === "Customer") ? `<button type="button" class="secondary-button" data-job-signoff="Customer" data-job-id="${job.id}">Record Customer Signoff</button>` : ""}
+    ${job.status === "Work Complete" && state.serviceSignoffs.filter((signoff) => signoff.service_work_order_id === workOrder?.id).length >= 2 ? `<button type="button" class="primary-button" data-job-action="complete_signoff" data-job-id="${job.id}">Complete Signoff Stage</button>` : ""}
+    ${job.status === "Signoff Complete" ? `<button type="button" class="primary-button" data-job-action="close" data-job-id="${job.id}">Close Service Work</button>` : ""}
+  </div>` : "";
+  const technicianActions = technician ? `<div class="request-actions operations-job-actions">
+    ${job.status === "Released" ? `<button type="button" class="primary-button" data-job-action="start" data-job-id="${job.id}">Start Work</button>` : ""}
+    ${job.status === "In Progress" && completed === checkpoints.length ? `<button type="button" class="primary-button" data-job-action="complete_work" data-job-id="${job.id}">Mark Work Complete</button>` : ""}
+  </div>` : "";
+  return `<article class="operations-job-card" data-operations-job-card="${job.id}">
+    <header><div><span>${escapeHTML(job.job_number || job.id)} · ${escapeHTML(job.job_type || "operations")}</span><h3>${escapeHTML(job.title)}</h3><p>${request ? `${escapeHTML(request.request_number)} · ${escapeHTML(workOrder?.work_order_number || "Work Order pending")}` : "Linked Build Order"}</p></div><div class="operations-job-status"><b class="request-stage is-${slugify(job.status)}">${escapeHTML(job.status)}</b><small>GP ${escapeHTML(job.gp_link_status || "Pending")}</small></div></header>
+    <div class="request-facts"><div><span>Priority</span><strong>${escapeHTML(job.priority)}</strong></div><div><span>Work center</span><strong>${escapeHTML(state.workCenters.find((center) => center.id === job.work_center_id)?.name || "Not assigned")}</strong></div><div><span>Assignee</span><strong>${escapeHTML(job.assignee_name || "Not assigned")}</strong></div><div><span>Commitment</span><strong>${operationDateTime(assignment?.ends_at || job.committed_due_at)}</strong></div></div>
+    ${job.exception_detail ? `<div class="request-exception"><strong>${escapeHTML(job.exception_code || "Exception")}</strong><span>${escapeHTML(job.exception_detail)}</span></div>` : ""}
+    ${scopeControls}${scheduleControls}
+    <div class="checkpoint-list"><header><strong>Controlled checkpoints</strong><span>${completed} of ${checkpoints.length} complete</span></header>${checkpoints.map((checkpoint) => {
+      const definition = state.operationsCheckpointDefinitions.find((entry) => entry.checkpoint_key === checkpoint.checkpoint_key && Number(entry.version) === Number(checkpoint.checkpoint_version));
+      const ownerRole = checkpoint.owner_role || definition?.owner_role || "Shared";
+      const canUpdate = controller || (technician && ["service_technician", "shop"].includes(ownerRole));
+      return `<div class="checkpoint-row is-${slugify(checkpoint.status)}"><span>${["Complete", "Waived"].includes(checkpoint.status) ? "✓" : checkpoint.status === "Blocked" ? "!" : "○"}</span><div><strong>${escapeHTML(checkpoint.checkpoint_name || definition?.name || checkpoint.checkpoint_key)}</strong><small>${escapeHTML(ownerRole)} · ${escapeHTML(checkpoint.status)}${checkpoint.evidence_note ? ` · ${escapeHTML(checkpoint.evidence_note)}` : ""}</small></div>${canUpdate && ["Released", "In Progress"].includes(job.status) && !["Complete", "Waived"].includes(checkpoint.status) ? `<button type="button" class="table-button" data-checkpoint-complete="${escapeHTML(checkpoint.checkpoint_key)}" data-job-id="${job.id}">Complete</button>` : ""}</div>`;
+    }).join("") || '<p class="quote-list-empty">Checkpoint template pending.</p>'}</div>
+    ${gatekeeperActions}${technicianActions}
+  </article>`;
+}
+
+async function runJobAction(job, action, card) {
+  try {
+    if (action === "schedule") {
+      const workCenterId = card.querySelector(`[data-job-center="${CSS.escape(job.id)}"]`)?.value;
+      const startsAt = card.querySelector(`[data-job-start="${CSS.escape(job.id)}"]`)?.value;
+      const endsAt = card.querySelector(`[data-job-end="${CSS.escape(job.id)}"]`)?.value;
+      const assigneeUserId = card.querySelector(`[data-job-assignee="${CSS.escape(job.id)}"]`)?.value || null;
+      if (!workCenterId || !startsAt || !endsAt) throw new Error("Choose a work center and complete schedule window.");
+      if (!isPublicDemo) await postOperationsAction({ operation: "schedule_job", operationsJobId: job.id, workCenterId, slotNumber: 1, startsAt, endsAt, reason: "Gatekeeper capacity commitment", assigneeUserId });
+      else {
+        job.status = "Scheduled"; job.work_center_id = workCenterId; job.planned_start_at = new Date(startsAt).toISOString(); job.committed_due_at = new Date(endsAt).toISOString(); job.updated_at = new Date().toISOString();
+        if (assigneeUserId) { job.assignee_user_id = assigneeUserId; job.assignee_name = state.operationalUsers.find((user) => user.id === assigneeUserId)?.display_name || "Assigned employee"; }
+        state.operationsJobAssignments.filter((entry) => entry.job_id === job.id && !entry.superseded_at).forEach((entry) => { entry.superseded_at = job.updated_at; });
+        state.operationsJobAssignments.unshift({ id: Date.now(), job_id: job.id, work_center_id: workCenterId, slot_number: 1, starts_at: job.planned_start_at, ends_at: job.committed_due_at, revision: 1, reason: "Gatekeeper capacity commitment", created_at: job.updated_at, superseded_at: null });
+      }
+    } else if (!isPublicDemo) {
+      await postOperationsAction({ operation: "transition_service_job", operationsJobId: job.id, action, note: "Recorded from the Operations Board" });
+    } else {
+      const statuses = { release: "Released", start: "In Progress", complete_work: "Work Complete", complete_signoff: "Signoff Complete", close: "Closed" };
+      job.status = statuses[action] || job.status; job.updated_at = new Date().toISOString();
+      if (action === "start") job.actual_started_at = job.updated_at;
+      if (action === "complete_work") job.work_completed_at = job.updated_at;
+      if (action === "complete_signoff") job.signoff_completed_at = job.updated_at;
+      if (action === "close") {
+        job.closed_at = job.updated_at;
+        const request = serviceRequestForJob(job);
+        if (request) { request.status = "Resolved"; request.resolved_at = job.updated_at; }
+      }
+    }
+    if (isPublicDemo) {
+      state.operationsJobEvents.unshift({ event_key: `oje-${Date.now()}`, job_id: job.id, event_type: action, summary: `Operations action: ${action.replaceAll("_", " ")}`, detail: "Recorded from the portfolio Operations Board.", created_at: new Date().toISOString() });
+      saveOperationsSnapshot();
+    }
+    renderOperationsBoardWorkspace();
+    showToast(`${job.job_number || "Operations Job"} moved to ${job.status}`);
+  } catch (error) { showToast(error.message); }
+}
+
+async function establishServiceScope(job, card) {
+  const request = serviceRequestForJob(job);
+  const workOrder = request ? serviceWorkOrderForRequest(request) : null;
+  const detail = card?.querySelector(`[data-job-scope="${CSS.escape(job.id)}"]`)?.value.trim();
+  if (!workOrder || !detail) { showToast("Describe the controlled service scope first"); return; }
+  try {
+    if (!isPublicDemo) await postOperationsAction({ operation: "replace_service_scope", serviceWorkOrderId: workOrder.id, scopeSummary: detail, scopeItems: [{ section: "Correction", detail, status: "Pending", isRequired: true }] });
+    else { workOrder.scope_version = Number(workOrder.scope_version || 0) + 1; workOrder.scope_summary = detail; saveOperationsSnapshot(); }
+    renderOperationsBoardWorkspace();
+    showToast(`${workOrder.work_order_number || "Service Work Order"} scope version established`);
+  } catch (error) { showToast(error.message); }
+}
+
+async function completeOperationsCheckpoint(job, checkpointKey) {
+  const checkpoint = state.operationsJobCheckpoints.find((entry) => entry.job_id === job.id && entry.checkpoint_key === checkpointKey);
+  if (!checkpoint) return;
+  try {
+    if (!isPublicDemo) await postOperationsAction({ operation: "update_checkpoint", operationsJobId: job.id, checkpointKey, checkpointVersion: checkpoint.checkpoint_version || 1, status: "Complete", evidenceNote: "Completion recorded by assigned technician." });
+    else { checkpoint.status = "Complete"; checkpoint.completed_at = new Date().toISOString(); checkpoint.evidence_note = "Completion recorded by assigned technician."; saveOperationsSnapshot(); }
+    renderOperationsBoardWorkspace();
+  } catch (error) { showToast(error.message); }
+}
+
+async function recordOperationsSignoff(job, partyType) {
+  const request = serviceRequestForJob(job);
+  const workOrder = request ? serviceWorkOrderForRequest(request) : null;
+  if (!workOrder) return;
+  const signoffKey = `signoff-${workOrder.id}-${partyType.toLowerCase()}`;
+  try {
+    if (!isPublicDemo) await postOperationsAction({ operation: "record_signoff", serviceWorkOrderId: workOrder.id, signoffKey, partyType, representativeName: partyType === "Internal" ? "MDB Service Controller" : "Customer Representative", decision: "Accepted", notes: "Captured from controlled closeout." });
+    else {
+      state.serviceSignoffs.push({ signoff_key: signoffKey, service_work_order_id: workOrder.id, scope_version: Math.max(1, Number(workOrder.scope_version) || 1), party_type: partyType, representative_name: partyType === "Internal" ? "MDB Service Controller" : "Customer Representative", decision: "Accepted", signed_at: new Date().toISOString() });
+      saveOperationsSnapshot();
+    }
+    renderOperationsBoardWorkspace();
+    showToast(`${partyType} signoff recorded`);
+  } catch (error) { showToast(error.message); }
+}
+
+function renderOperationsBoardWorkspace() {
+  const serviceInbox = state.serviceRequests.filter((request) => ["Submitted", "Triaged", "Accepted"].includes(request.status));
+  const buildInbox = state.buildRequests.filter((request) => request.status === "Submitted");
+  const activeJobs = state.operationsJobs.filter((job) => !["Closed", "Cancelled"].includes(job.status))
+    .sort((a, b) => Number(a.priority || 3) - Number(b.priority || 3));
+  const exceptions = activeJobs.filter((job) => job.exception_code);
+  const controller = state.operationsBoardRole === "service_controller";
+  elements.overlayBody.innerHTML = `<div class="workbench production-workbench operations-board-workbench">
+    <div class="operations-toolbar"><div><strong>Operations Board</strong><span>One controlled queue for capacity and exceptions; specialized Build Orders and Service Work Orders stay distinct underneath.</span></div><button type="button" class="secondary-button" data-service-open-requests>Open Requester View</button></div>
+    <div class="build-role-switch"><div><span>VIEW AS</span><strong>${controller ? "Gatekeeper / Controller" : "Assigned Service Technician"}</strong></div><div><button type="button" data-operations-role="service_controller" class="${controller ? "is-active" : ""}">Gatekeeper</button><button type="button" data-operations-role="service_technician" class="${!controller ? "is-active" : ""}">Technician</button></div></div>
+    <div class="production-boundary ${controller ? "is-controller" : ""}"><span>${controller ? "CONTROL AUTHORITY" : "EXECUTION VIEW"}</span><strong>${controller ? "Every build and service commitment passes through the gatekeeper." : "Technicians execute assigned work and document checkpoint evidence."}</strong><p>${controller ? "The gatekeeper accepts or returns demand, separates request from execution, commits scarce bays, sets priority, releases work, manages exceptions, and closes only after signoff." : "Schedule, priority, customer promise, and closeout authority remain locked. The technician starts released work, records evidence, and marks the work itself complete."}</p></div>
+    <div class="order-metric-grid"><div><span>Build decisions</span><strong>${buildInbox.length}</strong></div><div><span>Service decisions</span><strong>${serviceInbox.length}</strong></div><div><span>Active Operations Jobs</span><strong>${activeJobs.length}</strong></div><div><span>Exceptions</span><strong>${exceptions.length}</strong></div></div>
+    ${controller ? `<section class="production-queue-section combined-gatekeeper-inbox"><header><div><span>01</span><h3>Combined Gatekeeper Inbox</h3></div><p>Demand is reviewed here before either specialized execution document is released.</p></header>
+      <div class="operations-inbox-columns"><div><header><strong>Sales Build Requests</strong><span>${buildInbox.length}</span></header><div class="request-card-list">${buildInbox.map((request) => buildRequestCardHtml(request, "controller")).join("") || '<div class="request-empty-state"><strong>Build inbox clear.</strong></div>'}</div></div><div><header><strong>Service Requests</strong><span>${serviceInbox.length}</span></header><div class="request-card-list">${serviceInbox.map((request) => serviceRequestCardHtml(request, "controller")).join("") || '<div class="request-empty-state"><strong>Service inbox clear.</strong></div>'}</div></div></div>
+    </section>` : ""}
+    <section class="production-queue-section"><header><div><span>${controller ? "02" : "01"}</span><h3>${controller ? "Committed Operations" : "My Assigned Service Work"}</h3></div><p>Capacity, checkpoints, events, and exceptions live on the shared Operations Job.</p></header><div class="operations-job-list">${activeJobs.map(operationJobCardHtml).join("") || '<div class="request-empty-state"><strong>No active Operations Jobs.</strong></div>'}</div></section>
   </div>`;
 }
 
@@ -4483,6 +5048,11 @@ elements.overlayBody.addEventListener("change", async (event) => {
 });
 
 elements.overlayBody.addEventListener("submit", (event) => {
+  if (event.target.id === "serviceRequestForm") {
+    event.preventDefault();
+    createServiceRequestFromForm(event.target);
+    return;
+  }
   if (event.target.id === "buildRequestForm") {
     event.preventDefault();
     createBuildRequestFromForm(event.target);
@@ -4522,6 +5092,42 @@ elements.overlayBody.addEventListener("keydown", (event) => {
 });
 
 elements.overlayBody.addEventListener("click", (event) => {
+  if (event.target.closest("[data-service-new]")) { state.serviceRequestEditorOpen = true; state.serviceRequestFormError = ""; renderServiceRequestsWorkspace(); $("#serviceRequestForm select[name='sourceChannel']")?.focus(); return; }
+  if (event.target.closest("[data-service-editor-close]")) { state.serviceRequestEditorOpen = false; state.serviceRequestFormError = ""; renderServiceRequestsWorkspace(); return; }
+  if (event.target.closest("[data-service-open-requests]")) { openWorkspace("serviceRequests"); return; }
+  if (event.target.closest("[data-open-operations-board]")) { openWorkspace("operationsBoard"); return; }
+  const operationsRole = event.target.closest("[data-operations-role]");
+  if (operationsRole) { state.operationsBoardRole = operationsRole.dataset.operationsRole; renderOperationsBoardWorkspace(); return; }
+  const serviceTransition = event.target.closest("[data-service-transition]");
+  if (serviceTransition) {
+    const request = state.serviceRequests.find((entry) => entry.id === serviceTransition.dataset.serviceRequestId);
+    if (request) transitionServiceRequest(request, serviceTransition.dataset.serviceTransition, serviceTransition.closest("[data-service-request-card]"));
+    return;
+  }
+  const scopeSave = event.target.closest("[data-job-scope-save]");
+  if (scopeSave) {
+    const job = state.operationsJobs.find((entry) => entry.id === scopeSave.dataset.jobScopeSave);
+    if (job) establishServiceScope(job, scopeSave.closest("[data-operations-job-card]"));
+    return;
+  }
+  const jobAction = event.target.closest("[data-job-action]");
+  if (jobAction) {
+    const job = state.operationsJobs.find((entry) => entry.id === jobAction.dataset.jobId);
+    if (job) runJobAction(job, jobAction.dataset.jobAction, jobAction.closest("[data-operations-job-card]"));
+    return;
+  }
+  const checkpointComplete = event.target.closest("[data-checkpoint-complete]");
+  if (checkpointComplete) {
+    const job = state.operationsJobs.find((entry) => entry.id === checkpointComplete.dataset.jobId);
+    if (job) completeOperationsCheckpoint(job, checkpointComplete.dataset.checkpointComplete);
+    return;
+  }
+  const jobSignoff = event.target.closest("[data-job-signoff]");
+  if (jobSignoff) {
+    const job = state.operationsJobs.find((entry) => entry.id === jobSignoff.dataset.jobId);
+    if (job) recordOperationsSignoff(job, jobSignoff.dataset.jobSignoff);
+    return;
+  }
   if (event.target.closest("[data-request-new]")) { state.buildRequestEditorOpen = true; state.buildRequestFormError = ""; renderBuildRequestsWorkspace(); $("#buildRequestForm select[name='sourceLine']")?.focus(); return; }
   if (event.target.closest("[data-request-editor-close]")) { state.buildRequestEditorOpen = false; state.buildRequestFormError = ""; renderBuildRequestsWorkspace(); return; }
   if (event.target.closest("[data-request-open-orders]")) { openWorkspace("orders"); return; }

@@ -10,7 +10,10 @@ MDB is one application and one operational data platform, but it preserves separ
 
 Sales documents express customer demand. Build Requests carry that demand into Production Control. Build Orders authorize and record shop execution. Posted inventory entries are immutable facts. These records must never be flattened into one editable document.
 
-The separate Ops portfolio remains a reference until this contract, its database relationships, and its transition tests are stable.
+The separate Ops portfolio is now a frozen reference. Build Orders link into the
+shared Operations Job control plane defined in
+`OPERATIONS_JOB_AND_SERVICE_FOUNDATION.md`; production quantity, components,
+inventory posting, and finished output remain Build Order responsibilities.
 
 ## Roles
 

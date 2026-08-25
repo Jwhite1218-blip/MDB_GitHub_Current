@@ -36,7 +36,8 @@ The deployed files matched the local portfolio source byte-for-byte at audit tim
 | Opportunities | Retained through Rig Sales rather than duplicated |
 | Follow-Up | Retained through Daily Call List and customer interaction history |
 | Guided Tour | Retained through current training and knowledge surfaces |
-| Production coordination | Expanded into the new Build Request, Production Control, and Build Order lifecycle |
+| Production coordination | Expanded into Build Requests, Build Orders, Production Control, and the shared Operations Job |
+| Service coordination | Expanded into Service Requests, Service Work Orders, the Operations Board, capacity, checkpoints, signoff, and closeout |
 
 ## Unified production workflow
 
@@ -52,6 +53,11 @@ The missing operational value was converted into one controlled flow:
 
 The public demo simulates these role boundaries in-browser so the workflow can be evaluated. The operational foundation in `PRODUCTION_CONTROL_FOUNDATION.md`, its database migration, and the authenticated `production-control` Function are the enforcement path for a future internal deployment.
 
+The next merge layer is now defined in
+`OPERATIONS_JOB_AND_SERVICE_FOUNDATION.md`. It links Build Orders and separate
+Service Work Orders to one shared Operations Job so the gatekeeper can direct
+production and service capacity without erasing their specialized behavior.
+
 ## Deliberate exclusions
 
 - No duplicate ERP navigation, posting journals, finance, purchasing, or administrative setup was copied from Business Central.
@@ -59,7 +65,9 @@ The public demo simulates these role boundaries in-browser so the workflow can b
 - No direct GP write-back was added. GP remains the current transactional authority.
 - No live Supabase schema or data was changed during this interface merge.
 - The historical Netlify site was not deleted, redirected, or overwritten.
-- The unified repository was not committed, pushed, or deployed as part of the local merge.
+- The new shared operations/service foundation remains on its local feature
+  branch until review; it has not been deployed or connected to live company
+  systems.
 
 ## Retirement gate
 

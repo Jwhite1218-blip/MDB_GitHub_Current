@@ -7,8 +7,12 @@ network. Mobile access is limited to specifically authorized employees and is a
 focused **Mobile Lite** surface for situations where a phone can shorten the
 service-response loop.
 
-This note records a future concept only. It does not authorize or implement
-mobile ordering, NFC access, notifications, or live service workflows yet.
+This remains a future device/integration concept. The shared operations
+foundation now reserves `Mobile` and `NFC` intake channels and demonstrates the
+narrow responsive Service Request frame, but it does not authorize or implement
+mobile ordering, NFC tag resolution, notification delivery, or a live service
+deployment yet. See `OPERATIONS_JOB_AND_SERVICE_FOUNDATION.md` for the controlled
+request-to-close lifecycle that future mobile intake will enter.
 
 ## High-value service scenario
 

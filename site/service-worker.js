@@ -1,16 +1,16 @@
 "use strict";
 
-const SHELL_CACHE = "mdb-shell-20260824-5";
-const DATA_CACHE = "mdb-static-data-20260824-5";
+const SHELL_CACHE = "mdb-shell-20260825-1";
+const DATA_CACHE = "mdb-static-data-20260825-1";
 const CACHE_ALLOWLIST = [SHELL_CACHE, DATA_CACHE];
 const SHELL_ASSETS = [
   "/",
   "/index.html",
-  "/styles.css?v=20260824-5",
-  "/app-shell.js?v=20260824-5",
-  "/tooling-search.js?v=20260824-5",
-  "/app.js?v=20260824-5",
-  "/manifest.webmanifest?v=20260824-5",
+  "/styles.css?v=20260825-1",
+  "/app-shell.js?v=20260825-1",
+  "/tooling-search.js?v=20260825-1",
+  "/app.js?v=20260825-1",
+  "/manifest.webmanifest?v=20260825-1",
   "/assets/mobile-drill-logo-transparent.png",
   "/assets/mdb-app-icon-192.png",
   "/assets/mdb-app-icon-512.png"

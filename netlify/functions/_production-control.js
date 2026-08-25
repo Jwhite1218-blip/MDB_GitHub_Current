@@ -5,6 +5,8 @@ const ROLES = Object.freeze({
   PRODUCTION_CONTROLLER: "production_controller",
   SHOP: "shop",
   INVENTORY_CONTROLLER: "inventory_controller",
+  SERVICE_CONTROLLER: "service_controller",
+  SERVICE_TECHNICIAN: "service_technician",
   ADMIN: "admin",
 });
 

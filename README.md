@@ -144,6 +144,24 @@ the production-control migration and complete Build Request-to-finished-goods
 lifecycle in an isolated PostgreSQL-compatible engine, including role grants,
 RLS, inventory reservation, shortage rollback, and idempotent posting.
 
+## Shared Operations Job and Service foundation
+
+The combined production/service control plane is defined in
+`docs/architecture/OPERATIONS_JOB_AND_SERVICE_FOUNDATION.md` and implemented by
+`supabase/migrations/20260825090000_operations_job_service_foundation.sql`.
+
+Service Requests, Service Work Orders, Build Orders, and the shared Operations
+Job remain separate records with explicit links. The Operations Board gives the
+gatekeeper one capacity, assignment, checkpoint, exception, and closeout queue
+without flattening specialized production and service behavior. The requester
+view tracks the controlled lifecycle without granting execution authority.
+
+The authenticated `/api/operations/jobs` endpoint is the only browser write
+path for this foundation. It resolves the signed-in employee server-side and
+calls role-checked transactional RPCs. The public portfolio uses browser-local
+simulation only and includes narrow Mobile/NFC intake channels as a future
+Mobile Lite seam, not as a mobile ERP.
+
 ## GP read-only sync preparation
 
 The inbound-only GP staging contract is documented in

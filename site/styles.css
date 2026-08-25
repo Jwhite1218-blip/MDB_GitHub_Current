@@ -5311,3 +5311,281 @@ button:disabled {
   }
 }
 
+/* Shared Operations Job + Service Request foundation. */
+.operations-board-workbench,
+.service-workbench {
+  max-width: 1540px;
+}
+
+.service-request-editor form {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.service-request-card .request-stage.is-waiting-on-gatekeeper,
+.service-request-card .request-stage.is-triaged,
+.operations-job-status .request-stage.is-order-setup-pending,
+.operations-job-status .request-stage.is-scheduled {
+  color: #785300;
+  background: #fff1c7;
+}
+
+.service-request-card .request-stage.is-work-in-progress,
+.operations-job-status .request-stage.is-released,
+.operations-job-status .request-stage.is-in-progress {
+  color: #075f53;
+  background: #dff5ef;
+}
+
+.operations-inbox-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.operations-inbox-columns > div {
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  background: #f8fafb;
+}
+
+.operations-inbox-columns > div > header,
+.checkpoint-list > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.operations-inbox-columns > div > header span,
+.checkpoint-list > header span {
+  display: grid;
+  min-width: 26px;
+  min-height: 26px;
+  place-items: center;
+  padding: 0 7px;
+  border-radius: 999px;
+  color: var(--mobile-drill-blue-dark);
+  background: #e4eef5;
+  font-size: 0.67rem;
+  font-weight: 900;
+}
+
+.operations-inbox-columns .build-request-card > header {
+  padding: 14px;
+}
+
+.operations-inbox-columns .request-facts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.operations-inbox-columns .request-lifecycle {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 3px;
+}
+
+.operations-inbox-columns .request-lifecycle > div:nth-child(3)::after {
+  display: none;
+}
+
+.operations-job-list {
+  display: grid;
+  gap: 14px;
+}
+
+.operations-job-card {
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(0, 31, 60, 0.06);
+}
+
+.operations-job-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px 13px;
+  border-bottom: 1px solid var(--line);
+}
+
+.operations-job-card > header span,
+.operations-scope-controls label > span,
+.operations-job-controls label > span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ink-faint);
+  font-size: 0.61rem;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.operations-job-card h3,
+.operations-job-card header p {
+  margin: 2px 0 0;
+}
+
+.operations-job-card h3 {
+  color: var(--mobile-drill-blue-dark);
+  font-size: 0.96rem;
+}
+
+.operations-job-card header p {
+  color: var(--ink-faint);
+  font-size: 0.7rem;
+}
+
+.operations-job-status {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 4px;
+  justify-items: end;
+}
+
+.operations-job-status small {
+  color: var(--ink-faint);
+  font-size: 0.61rem;
+}
+
+.operations-scope-controls,
+.operations-job-controls {
+  display: grid;
+  gap: 10px;
+  align-items: end;
+  margin: 14px 18px;
+  padding: 13px;
+  border: 1px solid #d9c586;
+  border-radius: 9px;
+  background: #fffbef;
+}
+
+.operations-scope-controls {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.operations-job-controls {
+  grid-template-columns: minmax(140px, 1fr) repeat(2, minmax(175px, 1.2fr)) minmax(150px, 1fr) auto;
+}
+
+.operations-scope-controls label,
+.operations-job-controls label {
+  display: grid;
+  gap: 4px;
+}
+
+.operations-scope-controls textarea,
+.operations-job-controls input,
+.operations-job-controls select {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--ink);
+  background: #fff;
+  font: inherit;
+}
+
+.checkpoint-list {
+  margin: 14px 18px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--paper);
+}
+
+.checkpoint-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  min-height: 45px;
+  padding: 7px 4px;
+  border-top: 1px solid var(--line);
+}
+
+.checkpoint-row > span {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid #b9c6ce;
+  border-radius: 50%;
+  color: var(--ink-faint);
+  background: #fff;
+  font-size: 0.67rem;
+  font-weight: 900;
+}
+
+.checkpoint-row.is-complete > span,
+.checkpoint-row.is-waived > span {
+  color: #fff;
+  border-color: #1c7b68;
+  background: #1c7b68;
+}
+
+.checkpoint-row.is-blocked > span {
+  color: #fff;
+  border-color: #a33838;
+  background: #a33838;
+}
+
+.checkpoint-row strong,
+.checkpoint-row small {
+  display: block;
+}
+
+.checkpoint-row strong {
+  font-size: 0.71rem;
+}
+
+.checkpoint-row small {
+  margin-top: 2px;
+  color: var(--ink-faint);
+  font-size: 0.61rem;
+}
+
+.operations-job-actions {
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 1120px) {
+  .operations-inbox-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .operations-job-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .service-request-editor form,
+  .operations-job-controls,
+  .operations-scope-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .operations-job-card > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .operations-job-status {
+    justify-items: start;
+  }
+
+  .operations-inbox-columns > div,
+  .checkpoint-list,
+  .operations-scope-controls,
+  .operations-job-controls {
+    margin-right: 0;
+    margin-left: 0;
+  }
+}
+
