@@ -8,9 +8,18 @@
       content="Mobile Drill Brain operational workspace demo."
     >
     <meta name="mdb-app-mode" content="public-demo">
+    <meta name="theme-color" content="#0b2239">
+    <meta name="application-name" content="MDB">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Mobile Drill Brain</title>
-    <link rel="stylesheet" href="styles.css?v=20260821-1">
-    <script src="app.js?v=20260821-1" defer></script>
+    <link rel="manifest" href="manifest.webmanifest?v=20260824-5">
+    <link rel="icon" href="assets/mdb-app-icon-192.png" sizes="192x192" type="image/png">
+    <link rel="apple-touch-icon" href="assets/mdb-app-icon-192.png">
+    <link rel="stylesheet" href="styles.css?v=20260824-5">
+    <script src="app-shell.js?v=20260824-5" defer></script>
+    <script src="tooling-search.js?v=20260824-5" defer></script>
+    <script src="app.js?v=20260824-5" defer></script>
   </head>
 
   <body class="is-access-locked">
@@ -42,6 +51,8 @@
         >
       </button>
       <div class="app-banner-actions">
+        <span id="networkStatus" class="app-shell-status" role="status" aria-live="polite">Checking connection</span>
+        <button id="installAppButton" class="advanced-search-trigger" type="button" hidden>Install App</button>
         <button id="identityButton" class="advanced-search-trigger" type="button" hidden>Portfolio Demo</button>
         <button id="advancedSearchButton" class="advanced-search-trigger" type="button">Advanced Search</button>
         <span class="demo-pill">Public Sandbox</span>
@@ -87,6 +98,11 @@
         <strong>Training</strong>
         <button type="button" data-open="calibrationTraining"><span class="workspace-nav-icon" aria-hidden="true">CT</span><span>Calibration Training</span></button>
         <button type="button" data-open="workflowTraining"><span class="workspace-nav-icon" aria-hidden="true">WT</span><span>Workflow Training</span></button>
+      </div>
+
+      <div class="workspace-nav-group">
+        <strong>System</strong>
+        <button type="button" data-open="systemSync"><span class="workspace-nav-icon" aria-hidden="true">SYNC</span><span>System &amp; Sync</span></button>
       </div>
 
       <div class="workspace-nav-group" data-admin-only hidden>
@@ -150,6 +166,12 @@
               <button type="button" data-open="callList"><span class="quick-icon" aria-hidden="true">D</span><span>Daily Call List</span></button>
               <button type="button" data-open="calibrationTraining"><span class="quick-icon" aria-hidden="true">CT</span><span>Calibration Training</span></button>
               <button type="button" data-open="workflowTraining"><span class="quick-icon" aria-hidden="true">WT</span><span>Workflow Training</span></button>
+            </nav>
+          </section>
+          <section>
+            <h2>System</h2>
+            <nav class="quick-nav quick-nav--two" aria-label="System workspaces">
+              <button type="button" data-open="systemSync"><span class="quick-icon" aria-hidden="true">SYNC</span><span>System &amp; Sync</span></button>
             </nav>
           </section>
           <section data-admin-only hidden>
@@ -324,6 +346,12 @@
         <div id="advSearchResults" class="advanced-search-results"><p class="advanced-search-empty">Enter a value to search.</p></div>
       </div>
     </div>
+
+    <aside id="appUpdateNotice" class="app-update-notice" role="status" aria-live="polite" hidden>
+      <span>A tested MDB update is ready.</span>
+      <button id="applyAppUpdateButton" type="button">Update &amp; restart</button>
+      <button id="dismissAppUpdateButton" type="button">Later</button>
+    </aside>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   </body>

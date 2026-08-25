@@ -1,0 +1,88 @@
+{
+  "start": {
+    "operation": "start",
+    "contractVersion": 2,
+    "runKey": "MDB-ITEM-INVENTORY-2026-08-24T06:00:00Z",
+    "companyId": "MDB",
+    "connector": "gp_read_view",
+    "mappingVersion": "mdb-gp-map-1",
+    "entityPlans": [
+      { "entityType": "Item", "syncMode": "Delta" },
+      { "entityType": "Inventory", "syncMode": "Snapshot" }
+    ],
+    "metadata": {
+      "extractorHost": "GP-CONNECTOR-01",
+      "extractorBuild": "0.1.0"
+    }
+  },
+  "itemBatch": {
+    "operation": "batch",
+    "contractVersion": 2,
+    "runId": "00000000-0000-0000-0000-000000000000",
+    "batchKey": "Item-000001",
+    "batchSequence": 1,
+    "entityType": "Item",
+    "records": [
+      {
+        "externalId": "ITEM-100",
+        "sourceModifiedAt": "2026-08-24T05:00:00Z",
+        "deleted": false,
+        "payload": {
+          "ITEMNMBR": "ITEM-100",
+          "ITEMDESC": "GP source description",
+          "UOMSCHDL": "EACH"
+        },
+        "normalized": {
+          "partNumber": "ITEM-100",
+          "description": "GP source description",
+          "uom": "EA"
+        }
+      }
+    ]
+  },
+  "inventoryBatch": {
+    "operation": "batch",
+    "contractVersion": 2,
+    "runId": "00000000-0000-0000-0000-000000000000",
+    "batchKey": "Inventory-000001",
+    "batchSequence": 1,
+    "entityType": "Inventory",
+    "records": [
+      {
+        "externalId": "MAIN:ITEM-100",
+        "sourceModifiedAt": null,
+        "deleted": false,
+        "payload": {
+          "ITEMNMBR": "ITEM-100",
+          "LOCNCODE": "MAIN",
+          "QTYONHND": "12.00000",
+          "ATYALLOC": "2.00000"
+        },
+        "normalized": {
+          "partNumber": "ITEM-100",
+          "locationCode": "MAIN",
+          "quantityOnHand": "12.00000",
+          "quantityAllocated": "2.00000"
+        }
+      }
+    ]
+  },
+  "finish": {
+    "operation": "finish",
+    "contractVersion": 2,
+    "runId": "00000000-0000-0000-0000-000000000000",
+    "status": "Succeeded",
+    "entityResults": [
+      {
+        "entityType": "Item",
+        "endingWatermark": "2026-08-24T05:00:00Z|ITEM-100",
+        "expectedRecordCount": 1
+      },
+      {
+        "entityType": "Inventory",
+        "endingWatermark": "snapshot:2026-08-24T06:00:00Z",
+        "expectedRecordCount": 1
+      }
+    ]
+  }
+}

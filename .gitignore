@@ -1,3 +1,4 @@
 .netlify/
 supabase/.temp/
 node_modules/
+private-intake/

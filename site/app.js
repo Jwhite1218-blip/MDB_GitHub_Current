@@ -156,6 +156,7 @@ const state = {
   searchIndex: [],
   toolItems: [],
   items: [],
+  itemsByPart: new Map(),
   itemsBackendConfigured: false,
   itemView: { query: "", itemClass: "All", selectedPart: "" },
   quotes: [],
@@ -215,6 +216,9 @@ const state = {
   knownCustomers: [],
   knownCustomersConfigured: false,
   knownCustomersLoaded: false,
+  bootDurationMs: null,
+  gpSyncStatus: null,
+  gpSyncStatusLoading: false,
 };
 
 const purchaseTemplates = [
@@ -549,6 +553,7 @@ const workspaceEntries = [
   ["Daily Call List", "90-day customer touch queue", "callList", "dormant overdue follow up call"],
   ["Calibration Training", "Calibration practice workspace", "calibrationTraining", "training calibration practice"],
   ["Workflow Training", "Customer-call practice", "workflowTraining", "training workflow rookie knowledge chapter"],
+  ["System & Sync", "App health and read-only GP synchronization", "systemSync", "system sync gp read only health offline installed pwa"],
 ].map(([label, detail, action, aliases]) => ({ id: `workspace-${action}`, label, detail, category: "Workspace", action, aliases }));
 
 const rigModelSpecs = [
@@ -1697,6 +1702,7 @@ function statusClass(status) {
 }
 
 async function loadData() {
+  const startedAt = performance.now();
   const getJson = async (path) => {
     const response = await fetch(path);
     if (!response.ok) throw new Error(`${path} returned ${response.status}`);
@@ -1705,26 +1711,33 @@ async function loadData() {
   [state.data.rig, state.data.tooling] = await Promise.all([
     getJson("data/rig-parts.json"), getJson("data/tooling.json"),
   ]);
+
   state.stock = safeLoad("mdb-demo-stock", {});
-  await loadInventory();
   state.touches = safeLoad("mdb-demo-touches", {});
-  await loadQuotes();
-  await loadOrders();
-  await loadBuilds();
-  loadBuildRequests();
-  loadRigSalesOpportunities();
   state.identity = isPublicDemo
     ? { ...publicDemoIdentity }
     : safeLoad("mdb-demo-identity", null) || safeLoad("mdb-demo-calib-identity", null);
   state.calibResults = safeLoad("mdb-demo-calib-results", []);
   state.calibLocks = safeLoad("mdb-demo-calib-locks", {});
-  state.rigQuoteFiles = await loadRigQuoteFiles();
+
   buildToolItems();
   buildItemMaster();
-  await loadItems();
+  const rigQuoteFilesPromise = loadRigQuoteFiles().then((files) => { state.rigQuoteFiles = files; });
+  await Promise.all([
+    loadInventory(),
+    loadQuotes(),
+    loadOrders(),
+    loadBuilds(),
+    loadItems(),
+    rigQuoteFilesPromise,
+  ]);
+
+  loadBuildRequests();
+  loadRigSalesOpportunities();
   ensureProductionControlDemo();
   state.ready = true;
   buildSearchIndex();
+  state.bootDurationMs = Math.round(performance.now() - startedAt);
   elements.globalSearchInput.placeholder = "Search customer, tooling, part number, rig or serial...";
 }
 
@@ -1778,7 +1791,11 @@ function canonicalPartNumber(value) {
 }
 
 function itemIdForPart(part) {
-  return state.items.find((item) => item.partNumber === canonicalPartNumber(part))?.id || null;
+  return state.itemsByPart.get(canonicalPartNumber(part))?.id || null;
+}
+
+function rebuildItemLookup() {
+  state.itemsByPart = new Map(state.items.map((item) => [item.partNumber, item]));
 }
 
 function splitItemValues(value) {
@@ -1881,6 +1898,7 @@ function buildItemMaster() {
       descriptionVariants: [...item.descriptionVariants],
     };
   }).sort((a, b) => a.partNumber.localeCompare(b.partNumber, undefined, { numeric: true }));
+  rebuildItemLookup();
 }
 
 function mergeBackendItems(remoteItems) {
@@ -1906,6 +1924,7 @@ function mergeBackendItems(remoteItems) {
     });
   }
   state.items = [...map.values()].sort((a, b) => a.partNumber.localeCompare(b.partNumber, undefined, { numeric: true }));
+  rebuildItemLookup();
 }
 
 async function loadItems() {
@@ -2104,7 +2123,7 @@ function openWorkspace(type, options = {}) {
     items: "Items", tooling: "Tooling", customerTooling: "Customer Tooling", quotes: "Quote Builder", orders: "Orders", buildRequests: "Build Requests", productionControl: "Production Control", builds: "Build Orders", inventory: "Inventory", bom: "Rig / BOM View", rigSpecs: "Rig Specifications",
     calibration: "Calibration", rigSales: "Rig Sales", prospects: "New Prospect Search", callList: "Daily Call List",
     calibrationTraining: "Calibration Training", workflowTraining: "Workflow Training",
-    reports: "Sales Reports",
+    reports: "Sales Reports", systemSync: "System & Sync",
   };
   elements.overlayTitle.textContent = titles[type] || "Workspace";
   setActiveNav(type === "customerTooling" ? "customer" : type);
@@ -2132,6 +2151,10 @@ function openWorkspace(type, options = {}) {
   if (type === "calibrationTraining") renderCalibrationTrainingWorkspace();
   if (type === "workflowTraining") renderWorkflowTrainingWorkspace();
   if (type === "reports") { renderReportsWorkspace(); loadReports().then(() => { if (state.activeWorkspace === "reports") renderReportsWorkspace(); }); }
+  if (type === "systemSync") {
+    renderSystemSyncWorkspace();
+    loadGpSyncStatus().then(() => { if (state.activeWorkspace === "systemSync") renderSystemSyncWorkspace(); });
+  }
 }
 
 function closeWorkspace() {
@@ -2230,13 +2253,19 @@ function renderAdvancedSearchResults() {
 }
 
 function detectBuilder(query) {
-  const clean = normalize(query);
-  if (clean.includes("drive cap")) return "driveCap";
-  if (clean.includes("split spoon") || clean.includes("split sampler")) return "splitSpoon";
-  if (clean.includes("moyno") || /\b3l[468]\b/.test(clean)) return "moyno";
-  if (clean.includes("hex cor") || clean.includes("std duty") || clean.includes("solid stem")) return "hexCor";
-  if (clean.includes("hsa auger") || clean.includes("hollow stem auger")) return "hsaAuger";
-  return "";
+  return globalThis.MDBToolingSearch.detectGuidedBuilder(query);
+}
+
+const guidedToolingSelectors = Object.freeze([
+  ["driveCap", "Drive Cap"],
+  ["hsaAuger", "HSA Auger"],
+  ["splitSpoon", "Split Spoon"],
+  ["hexCor", "HEX-COR / STD"],
+  ["moyno", "Moyno"],
+]);
+
+function guidedToolingLabel(builder) {
+  return guidedToolingSelectors.find(([id]) => id === builder)?.[1] || "guided tooling";
 }
 
 function toolingFamilies() {
@@ -2249,9 +2278,8 @@ function activeToolingState() {
 
 function toolingBrowsePanel() {
   const toolState = activeToolingState();
-  const guided = [["driveCap", "Drive Cap"], ["hsaAuger", "HSA Auger"], ["splitSpoon", "Split Spoon"], ["hexCor", "HEX-COR / STD"], ["moyno", "Moyno"]];
   return `<section id="toolBrowsePanel" class="tool-browse-panel" ${toolState.browseOpen ? "" : "hidden"}>
-    <div><strong>Guided selectors</strong><span>Use compatibility-controlled dropdowns</span><div class="browse-buttons">${guided.map(([id, label]) => `<button type="button" data-tool-builder="${id}">${label}</button>`).join("")}</div></div>
+    <div><strong>Guided selectors</strong><span>Use compatibility-controlled dropdowns</span><div class="browse-buttons">${guidedToolingSelectors.map(([id, label]) => `<button type="button" data-tool-builder="${id}">${label}</button>`).join("")}</div></div>
     <div><strong>Catalog families</strong><span>Browse the complete tooling index</span><div class="browse-buttons">${toolingFamilies().map((family) => `<button type="button" class="${toolState.scope === family ? "is-active" : ""}" data-tool-scope="${escapeHTML(family)}">${escapeHTML(family === "All" ? "All Tooling" : family)}</button>`).join("")}</div></div>
   </section>`;
 }
@@ -2268,7 +2296,7 @@ function toolingCoreHtml(customer = null) {
       </div>
       ${toolingBrowsePanel()}
       <div class="tool-mode-bar"><strong id="toolModeLabel">${toolState.builder ? "Guided selection" : toolState.scope === "All" ? "All Tooling" : `Browsing ${escapeHTML(toolState.scope)}`}</strong>${toolState.builder || toolState.scope !== "All" ? '<button type="button" class="small-button" data-tool-reset>Back to All Tooling</button>' : ""}</div>
-      <div id="toolBuilderHost" ${toolState.builder ? "" : "hidden"}>${renderToolingBuilder()}</div>
+      <div id="toolBuilderHost" ${toolState.builder ? "" : "hidden"}>${renderToolingBuilderSurface()}</div>
       <div id="toolCatalogSurface" ${toolState.builder ? "hidden" : ""}>
         <div class="tooling-layout">
           <section class="tool-results-panel"><div id="toolResultSummary" class="panel-strip"></div><div id="toolResults" class="tool-results"></div></section>
@@ -2304,8 +2332,16 @@ function updateToolingModeSurface() {
   modeBar.innerHTML = `<strong id="toolModeLabel">${toolState.builder ? "Guided selection" : toolState.scope === "All" ? "All Tooling" : `Browsing ${escapeHTML(toolState.scope)}`}</strong>${toolState.builder || toolState.scope !== "All" ? '<button type="button" class="small-button" data-tool-reset>Back to All Tooling</button>' : ""}`;
   builderHost.hidden = !toolState.builder;
   catalogSurface.hidden = Boolean(toolState.builder);
-  if (toolState.builder) builderHost.innerHTML = renderToolingBuilder();
+  if (toolState.builder) builderHost.innerHTML = renderToolingBuilderSurface();
   else renderToolingResults();
+}
+
+function renderToolingBuilderSurface() {
+  const toolState = activeToolingState();
+  const routeNote = toolState.query.trim()
+    ? `<div class="tool-search-route"><span>Search intent recognized</span><strong>${escapeHTML(toolState.query)} → ${escapeHTML(guidedToolingLabel(toolState.builder))}</strong><small>Using the same compatibility-controlled rules as Browse Tooling.</small></div>`
+    : "";
+  return `${routeNote}${renderToolingBuilder()}`;
 }
 
 function optionHtml(values, current, placeholder = "Any") {
@@ -2447,13 +2483,12 @@ function renderToolingResults() {
   const query = toolState.query;
   let items = state.toolItems.filter((item) => toolState.scope === "All" || item.family === toolState.scope);
   if (query) {
-    items = items.map((item) => ({ ...item, score: matchScore(query, `${item.part} ${item.rawPart} ${item.description} ${item.family} ${item.subfamily} ${item.aliases}`) }))
-      .filter((item) => item.score >= 0.52).sort((a, b) => b.score - a.score);
+    items = globalThis.MDBToolingSearch.rankToolingItems(query, items);
   } else {
     items = items.sort((a, b) => Number(Boolean(b.part)) - Number(Boolean(a.part)) || a.description.localeCompare(b.description));
   }
   const visible = items.slice(0, 120);
-  $("#toolResultSummary").innerHTML = `<strong>${items.length.toLocaleString()} matches</strong><span>${items.length > visible.length ? `Showing first ${visible.length}` : "Full result set"}</span>`;
+  $("#toolResultSummary").innerHTML = `<strong>${items.length.toLocaleString()} matches</strong><span>${query ? "Exact part → description → controlled family → aliases" : items.length > visible.length ? `Showing first ${visible.length}` : "Full result set"}</span>`;
   $("#toolResults").innerHTML = visible.length ? visible.map((item) => `
     <button type="button" class="tool-result ${item.id === toolState.selectedId ? "is-selected" : ""}" data-tool-id="${escapeHTML(item.id)}">
       <span><strong>${escapeHTML(item.part || "No active PN")}</strong><small>${escapeHTML(item.description)}</small></span>
@@ -3472,6 +3507,126 @@ function renderReportsWorkspace() {
   </div>`;
 }
 
+async function loadGpSyncStatus() {
+  state.gpSyncStatusLoading = true;
+  if (isPublicDemo) {
+    state.gpSyncStatus = {
+      configured: false,
+      publicDemo: true,
+      readOnly: true,
+      runs: [],
+      runEntities: [],
+      cursors: [],
+      issues: [],
+    };
+    state.gpSyncStatusLoading = false;
+    return;
+  }
+  try {
+    const response = await fetch("/api/integrations/gp/status", { cache: "no-store" });
+    const data = await response.json().catch(() => ({}));
+    state.gpSyncStatus = response.ok
+      ? { configured: true, ...data }
+      : { configured: false, readOnly: true, error: data.error || `Status returned ${response.status}` };
+  } catch {
+    state.gpSyncStatus = { configured: false, readOnly: true, error: "The GP status service is unreachable." };
+  } finally {
+    state.gpSyncStatusLoading = false;
+  }
+}
+
+function syncRunRows(runs) {
+  if (!runs.length) return '<tr><td colspan="5">No GP snapshot runs have been received.</td></tr>';
+  return runs.map((run) => `<tr>
+    <td><strong>${escapeHTML(run.company_id)}</strong><br><small>${escapeHTML(run.run_key)}</small></td>
+    <td><span class="status-label ${run.status === "Succeeded" ? "status-label--good" : run.status === "Failed" ? "status-label--blocked" : "status-label--warn"}">${escapeHTML(run.status)}</span></td>
+    <td>${Number(run.records_seen || 0).toLocaleString()}</td>
+    <td>${escapeHTML((run.requested_entities || []).join(", ") || "—")}</td>
+    <td>${escapeHTML(run.finished_at ? new Date(run.finished_at).toLocaleString() : new Date(run.started_at).toLocaleString())}</td>
+  </tr>`).join("");
+}
+
+function syncCursorRows(cursors) {
+  if (!cursors.length) return '<tr><td colspan="4">No successful entity watermarks yet.</td></tr>';
+  return cursors.map((cursor) => `<tr>
+    <td>${escapeHTML(cursor.company_id)}</td>
+    <td>${escapeHTML(cursor.entity_type)}</td>
+    <td><code>${escapeHTML(cursor.source_watermark)}</code></td>
+    <td>${escapeHTML(new Date(cursor.last_successful_at).toLocaleString())}</td>
+  </tr>`).join("");
+}
+
+function syncEntityRows(entities) {
+  if (!entities.length) return '<tr><td colspan="6">No contract v2 entity receipts have been recorded.</td></tr>';
+  return entities.map((entity) => {
+    const completeCount = entity.expected_record_count == null
+      ? `${Number(entity.records_seen || 0).toLocaleString()} / pending`
+      : `${Number(entity.records_seen || 0).toLocaleString()} / ${Number(entity.expected_record_count).toLocaleString()}`;
+    const batchGap = Number(entity.batches_seen || 0) !== Number(entity.last_batch_sequence || 0);
+    const watermark = entity.ending_watermark || entity.starting_watermark || "First sync";
+    return `<tr>
+      <td><strong>${escapeHTML(entity.entity_type)}</strong><br><small>${escapeHTML(entity.sync_mode)}</small></td>
+      <td><span class="status-label ${entity.status === "Succeeded" ? "status-label--good" : entity.status === "Failed" ? "status-label--blocked" : "status-label--warn"}">${escapeHTML(entity.status)}</span></td>
+      <td>${escapeHTML(completeCount)}</td>
+      <td class="${batchGap ? "text-danger" : ""}">${Number(entity.batches_seen || 0).toLocaleString()}${batchGap ? ` / expected sequence ${Number(entity.last_batch_sequence || 0).toLocaleString()}` : ""}</td>
+      <td>${Number(entity.records_inserted || 0).toLocaleString()} / ${Number(entity.records_updated || 0).toLocaleString()} / ${Number(entity.records_unchanged || 0).toLocaleString()}</td>
+      <td><code>${escapeHTML(watermark)}</code></td>
+    </tr>`;
+  }).join("");
+}
+
+function renderSystemSyncWorkspace() {
+  const sync = state.gpSyncStatus;
+  const installed = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+  const serviceWorkerState = navigator.serviceWorker?.controller ? "Controlling this session" : "Registration pending / browser view";
+  const syncState = state.gpSyncStatusLoading
+    ? "Checking secure status…"
+    : sync?.configured
+      ? `${sync.runs.length} recent run${sync.runs.length === 1 ? "" : "s"}`
+      : sync?.publicDemo
+        ? "Disconnected in public sandbox"
+        : sync?.error || "Not connected";
+  const runs = sync?.runs || [];
+  const runEntities = sync?.runEntities || [];
+  const cursors = sync?.cursors || [];
+  const issues = sync?.issues || [];
+
+  elements.overlayBody.innerHTML = `<div class="workbench system-sync-workbench">
+    <div class="operations-toolbar">
+      <div><strong>System &amp; Sync</strong><span>Inspect the installed app shell and the inbound-only GP data catcher.</span></div>
+      <span class="status-label status-label--good">GP write-back disabled</span>
+    </div>
+    <div class="system-health-grid">
+      <article><span>Application mode</span><strong>${installed ? "Installed / standalone" : "Browser / installable"}</strong><small>${escapeHTML(serviceWorkerState)}</small></article>
+      <article><span>Connection</span><strong>${navigator.onLine ? "Online" : "Offline"}</strong><small>Operational APIs are never served from cache.</small></article>
+      <article><span>MDB startup</span><strong>${state.bootDurationMs == null ? "Measuring" : `${state.bootDurationMs.toLocaleString()} ms`}</strong><small>Catalog and operational loads run concurrently.</small></article>
+      <article><span>GP read sync</span><strong>${escapeHTML(syncState)}</strong><small>Snapshots stage first; matching and conflicts remain visible.</small></article>
+    </div>
+    <section class="system-boundary-card">
+      <h3>Authority boundary</h3>
+      <div class="system-boundary-flow" aria-label="GP integration flow">
+        <span>Microsoft GP<br><small>transactional authority</small></span><b aria-hidden="true">→</b>
+        <span>Authenticated extractor<br><small>read-only snapshots</small></span><b aria-hidden="true">→</b>
+        <span>MDB staging<br><small>idempotent + reconcilable</small></span><b aria-hidden="true">→</b>
+        <span>MDB workspaces<br><small>learn and assist</small></span>
+      </div>
+      ${sync?.publicDemo ? '<p class="system-note">The portfolio sandbox shows the architecture but intentionally has no employee identity, operational database, GP credentials, or company records attached.</p>' : sync?.error ? `<p class="system-note system-note--warning">${escapeHTML(sync.error)}</p>` : ""}
+    </section>
+    <section class="system-table-card">
+      <header><div><h3>Recent GP read runs</h3><p>Counts and status only; raw GP payloads never leave the server-side boundary.</p></div><span>${issues.length} open reconciliation issue${issues.length === 1 ? "" : "s"}</span></header>
+      <div class="table-scroll"><table class="data-table"><thead><tr><th>Company / run</th><th>Status</th><th>Seen</th><th>Entities</th><th>Finished / started</th></tr></thead><tbody>${syncRunRows(runs)}</tbody></table></div>
+    </section>
+    <section class="system-table-card">
+      <header><div><h3>Entity completeness</h3><p>Each entity owns its cursor, count reconciliation, and continuous batch sequence.</p></div></header>
+      <div class="table-scroll"><table class="data-table"><thead><tr><th>Entity / mode</th><th>Status</th><th>Seen / expected</th><th>Batches</th><th>Inserted / updated / unchanged</th><th>Latest watermark</th></tr></thead><tbody>${syncEntityRows(runEntities)}</tbody></table></div>
+    </section>
+    <section class="system-table-card">
+      <header><div><h3>Successful watermarks</h3><p>Incremental cursors advance only after a run finishes successfully.</p></div></header>
+      <div class="table-scroll"><table class="data-table"><thead><tr><th>Company</th><th>Entity</th><th>Watermark</th><th>Last success</th></tr></thead><tbody>${syncCursorRows(cursors)}</tbody></table></div>
+    </section>
+  </div>`;
+}
+
 function openOrderModal(orderId) {
   state.activeOrderId = orderId;
   state.orderSearchTerm = "";
@@ -4283,7 +4438,7 @@ function handleOverlayInput(event) {
   if (target.matches("[data-builder-field]")) {
     const toolState = activeToolingState();
     toolState.filters[target.dataset.builderField] = target.type === "checkbox" ? target.checked : target.value;
-    if (target.tagName === "SELECT" || event.type === "change") $("#toolBuilderHost").innerHTML = renderToolingBuilder();
+    if (target.tagName === "SELECT" || event.type === "change") $("#toolBuilderHost").innerHTML = renderToolingBuilderSurface();
   }
   if (target.matches("[data-stock-part]")) {
     const part = target.dataset.stockPart;

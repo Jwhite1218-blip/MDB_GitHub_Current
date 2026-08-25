@@ -5,7 +5,9 @@
   "description": "Mobile Drill Brain operational portal and production-control foundation",
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check:contracts": "node --check netlify/functions/_production-control.js"
+    "check:contracts": "node --check netlify/functions/_production-control.js",
+    "intake:inventory": "node scripts/intake-inventory.mjs",
+    "intake:plan": "node scripts/intake-plan.mjs"
   },
   "dependencies": {
     "@netlify/identity": "2.0.0"

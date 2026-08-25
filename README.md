@@ -144,6 +144,58 @@ the production-control migration and complete Build Request-to-finished-goods
 lifecycle in an isolated PostgreSQL-compatible engine, including role grants,
 RLS, inventory reservation, shortage rollback, and idempotent posting.
 
+## GP read-only sync preparation
+
+The inbound-only GP staging contract is documented in
+`docs/architecture/GP_READ_ONLY_SYNC_FOUNDATION.md` and implemented by the v1
+and v2 GP migrations plus the `gp-read-sync` and `gp-sync-status` Netlify
+Functions. Contract v2 adds per-entity delta/snapshot modes, independent
+cursors, mapping versions, batch continuity, exact completion counts, stale
+source protection, and changed-state lineage without adding any GP write-back
+path.
+
+This is preparation, not a live GP connection. The real connector remains
+blocked on the company's exact GP version, approved read path, company IDs,
+watermark semantics, and representative sample records. The public portfolio
+deployment never contacts GP or exposes raw GP payloads.
+
+The conversion from the current in-browser/full-list envelope to GP-sized read
+models is sequenced in
+`docs/architecture/SCALABILITY_AND_GP_INGESTION_PLAN.md`. GP landing,
+reconciliation, canonical facts, search projections, and audited workflows stay
+separate so growing the dataset does not bypass compatibility or Production
+Control rules.
+
+## Installable application shell
+
+The deployable site includes a PWA manifest, branded app icons, service worker,
+install prompt, online/offline indicator, controlled update prompt, and a visible
+System & Sync workspace. See
+`docs/architecture/PWA_APPLICATION_SHELL.md` for the exact cache and update
+boundaries.
+
+Operational APIs are never cached. Static shell and source-derived catalog data
+can support an offline view only after they have been loaded once. A supporting
+browser can install the app from HTTPS or localhost and open it in a standalone
+window.
+
+## Future Mobile Lite service concept
+
+Mobile remains a narrow, authorized service and escalation surface rather than
+a small-screen copy of the entire ERP. The future NFC-assisted rig profile,
+field-service request, office triage, and parts-escalation concept is recorded in
+`docs/architecture/MOBILE_LITE_SERVICE_CONCEPT.md`. An NFC scan supplies rig
+context only; it never serves as authentication or creates a GP order directly.
+
+## Controlled evidence intake
+
+Large OneDrive or selected-email exports must remain outside source control.
+`private-intake/` is Git-ignored. `npm run intake:inventory -- <folder>` creates
+a private metadata-first manifest, and `npm run intake:plan -- <manifest>`
+turns it into bounded, type-specific analysis batches before any document
+contents are opened. The handling and review gates are defined in
+`docs/architecture/CONTROLLED_EVIDENCE_INTAKE.md`.
+
 ### Public portfolio boundary
 
 The deployed public site is a sandbox, not an operational login surface:
@@ -178,6 +230,14 @@ Order entry never deducts inventory. Releasing an order reserves available stock
 The browser demo uses normalized records generated from the repository source set. The B57/B37X BOM hierarchy and tooling catalog depth are real source-derived demo data; current GP verification is still pending wherever the source says so. Inventory quantities, prices, quote values, and customer details remain editable demo values and are not production truth. The site does not load or expose the raw files in repository-level `docs/` or `data/`, and it does not claim live GP pricing, inventory, ordering, or invoicing.
 
 Training and Knowledge Chapter surfaces are intentionally separate from the normal operational workspace. Current CTS, WS004, compatibility, safety, and authority rules remain execution controls behind the interface rather than user-facing training steps.
+
+Tooling free-text ranking and its direct connection to the compatibility-guided
+Browse Tooling selectors are frozen in
+`docs/architecture/TOOLING_SEARCH_RANKING.md`. Exact part identity and direct
+descriptions outrank family and alias evidence; source authority and active-part
+status break close ties. Clear family intent such as `auger`, `drive cap`, or
+`split spoon` routes into the existing controlled selector instead of producing
+an unstructured result dump.
 
 ## Run the demo
 
