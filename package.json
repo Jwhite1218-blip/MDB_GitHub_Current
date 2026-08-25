@@ -4,6 +4,8 @@
   "version": "0.1.0",
   "description": "Mobile Drill Brain operational portal and production-control foundation",
   "scripts": {
+    "dev": "node scripts/serve-demo.mjs",
+    "start": "node scripts/serve-demo.mjs",
     "test": "node --test test/*.test.js",
     "check:contracts": "node --check netlify/functions/_production-control.js",
     "intake:inventory": "node scripts/intake-inventory.mjs",

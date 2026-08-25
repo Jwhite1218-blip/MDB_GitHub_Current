@@ -259,5 +259,12 @@ an unstructured result dump.
 
 ## Run the demo
 
-Serve the `site/` directory with any static web server. No build step is required. Direct `file://` opening is not supported because the browser loads the normalized JSON data files at runtime.
+Run `npm run dev`, then open `http://127.0.0.1:4173/`. The included
+zero-dependency server publishes only `site/`, supplies the required content
+types, and disables stale shell caching during local exploration. No build step
+is required.
+
+Direct `file://` opening is not supported because the browser loads the
+normalized JSON data files at runtime. Optional IndexedDB quote-file storage is
+fail-open and no longer blocks the core MDB startup path.
 

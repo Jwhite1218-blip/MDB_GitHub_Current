@@ -886,15 +886,31 @@ let rigQuoteDbPromise;
 function openRigQuoteDb() {
   if (!("indexedDB" in window)) return Promise.resolve(null);
   if (rigQuoteDbPromise) return rigQuoteDbPromise;
-  rigQuoteDbPromise = new Promise((resolve, reject) => {
-    const request = indexedDB.open("mdb-demo-files", 1);
-    request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains("rig-sales-quotes")) {
-        request.result.createObjectStore("rig-sales-quotes", { keyPath: "opportunityId" });
+  rigQuoteDbPromise = new Promise((resolve) => {
+    let settled = false;
+    const finish = (database) => {
+      if (settled) {
+        database?.close();
+        return;
       }
+      settled = true;
+      clearTimeout(timeout);
+      resolve(database);
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    const timeout = setTimeout(() => finish(null), 1800);
+    try {
+      const request = indexedDB.open("mdb-demo-files", 1);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains("rig-sales-quotes")) {
+          request.result.createObjectStore("rig-sales-quotes", { keyPath: "opportunityId" });
+        }
+      };
+      request.onsuccess = () => finish(request.result);
+      request.onerror = () => finish(null);
+      request.onblocked = () => finish(null);
+    } catch {
+      finish(null);
+    }
   });
   return rigQuoteDbPromise;
 }
@@ -1890,7 +1906,9 @@ async function loadData() {
 
   buildToolItems();
   buildItemMaster();
-  const rigQuoteFilesPromise = loadRigQuoteFiles().then((files) => { state.rigQuoteFiles = files; });
+  // Quote-PDF storage is optional browser convenience. A blocked IndexedDB
+  // request must never prevent core catalog and operational workspaces loading.
+  loadRigQuoteFiles().then((files) => { state.rigQuoteFiles = files; });
   await Promise.all([
     loadInventory(),
     loadQuotes(),
@@ -1898,7 +1916,6 @@ async function loadData() {
     loadBuilds(),
     loadItems(),
     loadOperations(),
-    rigQuoteFilesPromise,
   ]);
 
   loadBuildRequests();
