@@ -1887,13 +1887,21 @@ function statusClass(status) {
 
 async function loadData() {
   const startedAt = performance.now();
-  const getJson = async (path) => {
+  const getJson = async (path, bootstrapKey) => {
+    const bootstrapData = window.MDB_BOOTSTRAP_DATA?.[bootstrapKey];
+    if (bootstrapData) {
+      document.documentElement.dataset.catalogSource = "bootstrap";
+      return bootstrapData;
+    }
+    if (!document.documentElement.dataset.catalogSource) {
+      document.documentElement.dataset.catalogSource = "json";
+    }
     const response = await fetch(path);
     if (!response.ok) throw new Error(`${path} returned ${response.status}`);
     return response.json();
   };
   [state.data.rig, state.data.tooling] = await Promise.all([
-    getJson("data/rig-parts.json"), getJson("data/tooling.json"),
+    getJson("data/rig-parts.json", "rig"), getJson("data/tooling.json", "tooling"),
   ]);
 
   state.stock = safeLoad("mdb-demo-stock", {});
@@ -5689,7 +5697,7 @@ async function boot() {
     console.error(error);
     elements.globalSearchInput.placeholder = "MDB data did not load";
     elements.globalSearchInput.disabled = true;
-    showToast("The MDB data files did not load.");
+    showToast("MDB catalogs did not load. Reopen Explore or run npm run dev.");
   }
 }
 

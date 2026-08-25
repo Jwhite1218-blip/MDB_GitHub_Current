@@ -264,7 +264,10 @@ zero-dependency server publishes only `site/`, supplies the required content
 types, and disables stale shell caching during local exploration. No build step
 is required.
 
-Direct `file://` opening is not supported because the browser loads the
-normalized JSON data files at runtime. Optional IndexedDB quote-file storage is
-fail-open and no longer blocks the core MDB startup path.
+The approved normalized catalogs also have generated JavaScript bootstrap copies
+so repository Explore/file preview can start without browser permission to fetch
+local JSON. Run `npm run build:catalog-bootstrap` after changing either normalized
+JSON catalog. Hosted and GP-connected environments can still use the JSON/API
+paths; this bootstrap is only the static demo seed. Optional IndexedDB quote-file
+storage is fail-open and no longer blocks the core MDB startup path.
 

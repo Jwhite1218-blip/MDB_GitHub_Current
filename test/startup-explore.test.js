@@ -4,10 +4,12 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
 const { spawn } = require("node:child_process");
 
 const root = path.resolve(__dirname, "..");
 const app = fs.readFileSync(path.join(root, "site", "app.js"), "utf8");
+const index = fs.readFileSync(path.join(root, "site", "index.html"), "utf8");
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
 test("optional browser file storage cannot hold core MDB startup open", () => {
@@ -21,6 +23,28 @@ test("optional browser file storage cannot hold core MDB startup open", () => {
 test("Explore has an explicit zero-install HTTP entry point", () => {
   assert.equal(packageJson.scripts.dev, "node scripts/serve-demo.mjs");
   assert.equal(packageJson.scripts.start, "node scripts/serve-demo.mjs");
+});
+
+test("Explore can bootstrap approved catalogs without file-protocol fetch", () => {
+  assert.match(index, /data\/rig-parts\.js\?v=/);
+  assert.match(index, /data\/tooling\.js\?v=/);
+  assert.match(app, /window\.MDB_BOOTSTRAP_DATA\?\.\[bootstrapKey\]/);
+  assert.match(app, /dataset\.catalogSource = "bootstrap"/);
+  assert.equal(packageJson.scripts["build:catalog-bootstrap"], "node scripts/build-catalog-bootstrap.mjs");
+});
+
+test("generated bootstrap catalogs exactly match normalized JSON sources", () => {
+  const context = vm.createContext({ window: {} });
+  vm.runInContext(fs.readFileSync(path.join(root, "site", "data", "rig-parts.js"), "utf8"), context);
+  vm.runInContext(fs.readFileSync(path.join(root, "site", "data", "tooling.js"), "utf8"), context);
+  assert.equal(
+    JSON.stringify(context.window.MDB_BOOTSTRAP_DATA.rig),
+    JSON.stringify(JSON.parse(fs.readFileSync(path.join(root, "site", "data", "rig-parts.json"), "utf8"))),
+  );
+  assert.equal(
+    JSON.stringify(context.window.MDB_BOOTSTRAP_DATA.tooling),
+    JSON.stringify(JSON.parse(fs.readFileSync(path.join(root, "site", "data", "tooling.json"), "utf8"))),
+  );
 });
 
 test("local demo server publishes only the browser-safe site directory", async (t) => {
@@ -46,14 +70,17 @@ test("local demo server publishes only the browser-safe site directory", async (
     });
   });
 
-  const [indexResponse, dataResponse, privateResponse] = await Promise.all([
+  const [indexResponse, dataResponse, bootstrapResponse, privateResponse] = await Promise.all([
     fetch(url),
     fetch(`${url}data/tooling.json`, { method: "HEAD" }),
+    fetch(`${url}data/tooling.js`, { method: "HEAD" }),
     fetch(`${url}docs/architecture/OPERATIONS_JOB_AND_SERVICE_FOUNDATION.md`),
   ]);
   assert.equal(indexResponse.status, 200);
   assert.match(indexResponse.headers.get("content-type") || "", /text\/html/);
   assert.equal(dataResponse.status, 200);
   assert.match(dataResponse.headers.get("content-type") || "", /application\/json/);
+  assert.equal(bootstrapResponse.status, 200);
+  assert.match(bootstrapResponse.headers.get("content-type") || "", /text\/javascript/);
   assert.equal(privateResponse.status, 404);
 });
