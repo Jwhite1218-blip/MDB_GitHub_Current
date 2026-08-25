@@ -58,6 +58,10 @@ const serviceControllerRoles = Object.freeze([
   ROLES.PRODUCTION_CONTROLLER,
   ROLES.ADMIN,
 ]);
+const serviceEstimatorRoles = Object.freeze([
+  ROLES.SERVICE_ESTIMATOR,
+  ROLES.ADMIN,
+]);
 const serviceRequesterRoles = Object.freeze([
   ROLES.SALES,
   ROLES.SHOP,
@@ -213,6 +217,7 @@ module.exports = {
   operationsJobTransitionTarget,
   operationsJobTransitions,
   serviceControllerRoles,
+  serviceEstimatorRoles,
   serviceExecutionRoles,
   serviceRequestTransitionTarget,
   serviceRequestTransitions,

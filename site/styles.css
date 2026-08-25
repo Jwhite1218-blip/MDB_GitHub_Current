@@ -5322,6 +5322,9 @@ button:disabled {
 }
 
 .service-request-card .request-stage.is-waiting-on-gatekeeper,
+.service-request-card .request-stage.is-waiting-on-estimate,
+.service-request-card .request-stage.is-estimating,
+.service-request-card .request-stage.is-estimate-ready,
 .service-request-card .request-stage.is-triaged,
 .operations-job-status .request-stage.is-order-setup-pending,
 .operations-job-status .request-stage.is-scheduled {
@@ -5656,5 +5659,315 @@ button:disabled {
     margin-right: 0;
     margin-left: 0;
   }
+}
+
+/* Qualified Service Estimator -> Gatekeeper commercial handoff. */
+.service-estimating-workbench {
+  max-width: 1720px;
+}
+
+.service-estimator-seat-strip {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  margin: 14px 0;
+  overflow-x: auto;
+}
+
+.service-estimator-seat-strip > div {
+  display: grid;
+  min-width: 190px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.service-estimator-seat-strip > div:first-child {
+  min-width: 140px;
+  color: #fff;
+  border-color: var(--mobile-drill-blue-dark);
+  background: var(--mobile-drill-blue-dark);
+}
+
+.service-estimator-seat-strip span,
+.service-estimator-seat-strip small {
+  color: var(--ink-faint);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.service-estimator-seat-strip > div:first-child span { color: #bce9ff; }
+
+.service-estimating-layout {
+  display: grid;
+  grid-template-columns: 270px minmax(0, 1fr);
+  min-height: 760px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: var(--shadow-small);
+}
+
+.service-estimate-queue {
+  border-right: 1px solid var(--line);
+  background: #f4f7f9;
+}
+
+.service-estimate-queue > header,
+.service-estimate-queue > button {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 13px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.service-estimate-queue > header span {
+  display: grid;
+  place-items: center;
+  min-width: 25px;
+  height: 25px;
+  color: #fff;
+  border-radius: 999px;
+  background: var(--mobile-drill-blue);
+}
+
+.service-estimate-queue > button {
+  cursor: pointer;
+  color: var(--ink);
+  background: transparent;
+}
+
+.service-estimate-queue > button:hover,
+.service-estimate-queue > button.is-active {
+  background: #fff;
+  box-shadow: inset 4px 0 0 var(--speedway-blue);
+}
+
+.service-estimate-queue button strong,
+.service-estimate-queue button small { display: block; }
+.service-estimate-queue button small { margin-top: 3px; color: var(--ink-faint); }
+
+.service-estimate-workspace {
+  min-width: 0;
+  background: #eef3f6;
+}
+
+.service-estimate-matrix { min-width: 0; }
+
+.service-estimate-heading {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px 22px;
+  color: #fff;
+  background: linear-gradient(120deg, var(--mobile-drill-blue-dark), var(--mobile-drill-blue));
+}
+
+.service-estimate-heading span,
+.service-estimate-heading p {
+  display: block;
+  margin: 0;
+  color: #cdeeff;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.service-estimate-heading h2 { margin: 3px 0; font-size: 1.4rem; }
+.service-estimate-heading > div:last-child { min-width: 175px; text-align: right; }
+.service-estimate-heading > div:last-child strong { display: block; margin-top: 3px; }
+
+.service-intake-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+
+.service-intake-strip > div { min-width: 0; padding: 12px 14px; border-right: 1px solid var(--line); }
+.service-intake-strip span,
+.service-intake-strip strong { display: block; }
+.service-intake-strip span { color: var(--ink-faint); font-size: 0.66rem; font-weight: 900; text-transform: uppercase; }
+.service-intake-strip strong { margin-top: 4px; overflow: hidden; font-size: 0.78rem; text-overflow: ellipsis; white-space: nowrap; }
+
+.service-estimate-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  align-items: start;
+}
+
+.service-estimate-form { min-width: 0; padding: 16px; }
+
+.service-matrix-section {
+  margin-bottom: 14px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fff;
+}
+
+.service-matrix-section > header {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+  margin-bottom: 13px;
+}
+
+.service-matrix-section > header > span {
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  height: 30px;
+  color: #fff;
+  font-weight: 900;
+  border-radius: 7px;
+  background: var(--mobile-drill-blue);
+}
+
+.service-matrix-section > header > div { flex: 1; }
+.service-matrix-section h3,
+.service-matrix-section p { margin: 0; }
+.service-matrix-section p { margin-top: 2px; color: var(--ink-faint); font-size: 0.72rem; }
+.service-matrix-section label > span { display: block; margin-bottom: 5px; color: var(--ink-soft); font-size: 0.68rem; font-weight: 900; text-transform: uppercase; }
+.service-matrix-section input,
+.service-matrix-section select,
+.service-matrix-section textarea { width: 100%; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; }
+.service-matrix-section input,
+.service-matrix-section select { height: 36px; padding: 0 9px; }
+.service-matrix-section textarea { padding: 9px; resize: vertical; }
+
+.service-estimate-text-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+
+.service-estimate-line {
+  display: grid;
+  grid-template-columns: 105px minmax(210px, 1.5fr) 105px 92px 92px minmax(150px, 0.9fr) minmax(150px, 1fr) 30px;
+  gap: 6px;
+  align-items: center;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.service-estimate-line--header {
+  padding-top: 0;
+  color: var(--ink-faint);
+  font-size: 0.63rem;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.service-estimate-line.is-optional { opacity: 0.75; background: #f8fafb; }
+.service-estimate-description,
+.service-estimate-quantity { display: grid; grid-template-columns: minmax(0, 0.45fr) minmax(0, 1fr); gap: 5px; }
+.service-estimate-quantity { grid-template-columns: 1fr 0.7fr; }
+.service-estimate-source strong,
+.service-estimate-source small { display: block; }
+.service-estimate-source strong { font-size: 0.68rem; }
+.service-estimate-source small { margin-top: 2px; color: var(--ink-faint); font-size: 0.6rem; }
+.service-estimate-line input.needs-reason { border-color: var(--race-car-red); background: var(--danger-pale); }
+
+.service-estimate-summary {
+  position: sticky;
+  top: 0;
+  min-height: 100%;
+  padding: 16px;
+  border-left: 1px solid var(--line);
+  background: #fff;
+}
+
+.service-estimate-summary > header,
+.service-completeness > header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.service-estimate-summary h3 { margin: 2px 0 0; }
+.service-estimate-summary header span { color: var(--ink-faint); font-size: 0.62rem; font-weight: 900; }
+.service-cost-stack { margin: 14px 0; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.service-cost-stack > div { display: flex; justify-content: space-between; padding: 9px 10px; border-bottom: 1px solid var(--line); font-size: 0.72rem; }
+.service-cost-stack > div:last-child { border-bottom: 0; }
+.service-cost-stack .is-total { background: #f4f7f9; }
+.service-cost-stack .is-price { color: #fff; background: var(--mobile-drill-blue-dark); }
+.service-cost-stack .is-actual { color: var(--success); background: var(--success-pale); }
+.service-confidence,
+.service-completeness,
+.service-rate-warning { margin-top: 12px; padding: 11px; border-radius: 9px; background: #f4f7f9; }
+.service-confidence span,
+.service-confidence strong { display: block; }
+.service-confidence p,
+.service-rate-warning { color: var(--ink-soft); font-size: 0.68rem; }
+.service-completeness > div { display: flex; gap: 7px; align-items: center; margin-top: 6px; font-size: 0.69rem; }
+.service-completeness .is-ready span { color: var(--success); }
+.service-completeness .is-missing span { color: var(--race-car-red); }
+.service-rate-warning { color: var(--warning); background: var(--warning-pale); }
+
+.service-estimate-gate.is-ready > header,
+.service-gate-economics { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.service-estimate-gate.is-ready > header span,
+.service-estimate-gate.is-ready > header small { display: block; color: var(--ink-faint); font-size: 0.66rem; }
+.service-estimate-gate.is-ready > header > b { color: var(--mobile-drill-blue-dark); font-size: 1.15rem; }
+.service-gate-economics { margin: 10px 0; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.service-gate-economics span,
+.service-gate-economics strong { display: block; }
+.service-gate-economics span { color: var(--ink-faint); font-size: 0.62rem; }
+
+.service-cost-tracking { margin: 10px 16px; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: #f8fafb; }
+.service-cost-tracking > header { display: flex; align-items: center; justify-content: space-between; }
+.service-cost-tracking > header strong,
+.service-cost-tracking > header span { display: block; }
+.service-cost-tracking > header span { color: var(--ink-faint); font-size: 0.66rem; }
+.service-cost-variance { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0; }
+.service-cost-variance > div { padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.service-cost-variance span,
+.service-cost-variance strong { display: block; }
+.service-cost-variance span { color: var(--ink-faint); font-size: 0.62rem; }
+.service-cost-variance .is-over { color: var(--race-car-red); background: var(--danger-pale); }
+.service-cost-variance .is-under { color: var(--success); background: var(--success-pale); }
+.service-actual-list > div { display: grid; grid-template-columns: 80px minmax(0, 1fr) auto; gap: 8px; padding: 7px 0; border-top: 1px solid var(--line); }
+.service-actual-list small { grid-column: 2; color: var(--ink-faint); }
+.service-actual-list b { grid-row: 1 / span 2; grid-column: 3; }
+.service-cost-entry { display: grid; grid-template-columns: 105px minmax(180px, 1fr) 70px 60px 95px 110px minmax(140px, 1fr) auto; gap: 6px; margin-top: 10px; }
+.service-cost-entry input,
+.service-cost-entry select { min-width: 0; height: 34px; padding: 0 7px; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; }
+
+@media (max-width: 1250px) {
+  .service-estimate-body { grid-template-columns: 1fr; }
+  .service-estimate-summary { position: static; min-height: 0; border-top: 1px solid var(--line); border-left: 0; }
+  .service-estimate-line { grid-template-columns: 90px minmax(190px, 1.5fr) 95px 82px 82px minmax(130px, 0.8fr) minmax(130px, 1fr) 30px; overflow-x: auto; }
+  .service-cost-entry { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 850px) {
+  .service-estimating-layout { grid-template-columns: 1fr; }
+  .service-estimate-queue { display: flex; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+  .service-estimate-queue > header,
+  .service-estimate-queue > button { min-width: 210px; border-right: 1px solid var(--line); border-bottom: 0; }
+  .service-intake-strip { grid-template-columns: repeat(2, 1fr); }
+  .service-line-section { overflow-x: auto; }
+  .service-estimate-line { min-width: 1030px; }
+  .service-cost-variance { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 600px) {
+  .service-estimate-heading { flex-direction: column; }
+  .service-estimate-heading > div:last-child { text-align: left; }
+  .service-intake-strip,
+  .service-estimate-text-pair,
+  .service-cost-entry { grid-template-columns: 1fr; }
+  .service-estimate-form,
+  .service-estimate-summary { padding: 10px; }
+  .service-cost-tracking { margin-right: 0; margin-left: 0; }
+  .service-cost-variance { grid-template-columns: 1fr; }
 }
 

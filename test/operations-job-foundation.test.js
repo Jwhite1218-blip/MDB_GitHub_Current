@@ -18,6 +18,10 @@ const shopCentersMigration = fs.readFileSync(
   path.join(root, "supabase", "migrations", "20260825103000_operations_shop_work_centers.sql"),
   "utf8"
 );
+const serviceEstimateMigration = fs.readFileSync(
+  path.join(root, "supabase", "migrations", "20260825143000_service_estimate_matrix.sql"),
+  "utf8"
+);
 
 test("operations and service migration is explicitly transactional", () => {
   assert.match(migration, /^begin;/m);
@@ -41,6 +45,22 @@ test("requests, shared execution jobs, and specialized work documents stay separ
   assert.match(migration, /service_request_id text not null unique references public\.service_requests/);
   assert.match(migration, /operations_job_id text not null unique references public\.operations_jobs/);
   assert.match(migration, /alter table public\.build_orders[\s\S]*operations_job_id text/);
+});
+
+test("qualified service estimates separate pricing judgment from gatekeeper and execution", () => {
+  assert.match(serviceEstimateMigration, /^begin;/m);
+  assert.match(serviceEstimateMigration, /^commit;/m);
+  assert.match(serviceEstimateMigration, /'service_estimator'/);
+  assert.match(serviceEstimateMigration, /create table if not exists public\.service_estimates/);
+  assert.match(serviceEstimateMigration, /create table if not exists public\.service_estimate_lines/);
+  assert.match(serviceEstimateMigration, /create table if not exists public\.service_pricing_rules/);
+  assert.match(serviceEstimateMigration, /create table if not exists public\.service_actual_cost_entries/);
+  assert.match(serviceEstimateMigration, /mdb_save_service_estimate_v1/);
+  assert.match(serviceEstimateMigration, /mdb_transition_service_estimate_v1/);
+  assert.match(serviceEstimateMigration, /mdb_record_service_actual_cost_v1/);
+  assert.match(serviceEstimateMigration, /Only a qualified Service Estimator/);
+  assert.match(serviceEstimateMigration, /Only a Service Gatekeeper can approve an estimate/);
+  assert.doesNotMatch(serviceEstimateMigration, /grant\s+delete\s+on\s+public\.(service_estimate_events|service_actual_cost_entries)/i);
 });
 
 test("the shared job spine controls capacity, checkpoints, and append-only evidence", () => {

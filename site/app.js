@@ -196,14 +196,22 @@ const state = {
   operationsJobCheckpoints: [],
   operationsCheckpointDefinitions: [],
   serviceRequestEvents: [],
+  serviceEstimates: [],
+  serviceEstimateLines: [],
+  serviceEstimateEvents: [],
+  servicePricingRules: [],
+  serviceActualCosts: [],
   operationsJobEvents: [],
   serviceSignoffs: [],
   operationalUsers: [],
   workCenters: [],
   serviceRequestEditorOpen: false,
   serviceRequestFormError: "",
+  serviceEstimateSelectedRequestId: "",
+  serviceEstimateError: "",
   operationsBoardRole: "service_controller",
   operationsBackendConfigured: false,
+  operationsActor: null,
   operationsLoading: false,
   rigQuoteFiles: {},
   stock: {},
@@ -564,6 +572,7 @@ const workspaceEntries = [
   ["Orders", "Open orders, shipped and backorder tracking", "orders", "order orders open backorder shipped fulfillment"],
   ["Build Requests", "Sales demand sent to Production Control", "buildRequests", "build request production tracking sales demand"],
   ["Service Requests", "Field and office service intake with lifecycle tracking", "serviceRequests", "service request field rig machine down warranty repair"],
+  ["Service Estimating", "Qualified service quote matrix and cost structure", "serviceEstimating", "service estimate quote matrix labor parts cost margin estimator"],
   ["Operations Board", "Combined gatekeeper queue, capacity, and exceptions", "operationsBoard", "operations gatekeeper service production schedule bay capacity exception"],
   ["Production Control", "Gatekeeper queue, commitments, and shop direction", "productionControl", "gatekeeper production schedule assign priority release"],
   ["Build Orders", "Controlled shop execution and finished output", "builds", "build manufacturing production order shop components"],
@@ -709,6 +718,11 @@ function operationsSnapshot() {
     operationsJobCheckpoints: state.operationsJobCheckpoints,
     operationsCheckpointDefinitions: state.operationsCheckpointDefinitions,
     serviceRequestEvents: state.serviceRequestEvents,
+    serviceEstimates: state.serviceEstimates,
+    serviceEstimateLines: state.serviceEstimateLines,
+    serviceEstimateEvents: state.serviceEstimateEvents,
+    servicePricingRules: state.servicePricingRules,
+    serviceActualCosts: state.serviceActualCosts,
     operationsJobEvents: state.operationsJobEvents,
     serviceSignoffs: state.serviceSignoffs,
     operationalUsers: state.operationalUsers,
@@ -733,6 +747,156 @@ function operationsDemoTimestamp(daysFromNow = 0, hour = 12) {
   return date.toISOString();
 }
 
+const demoServicePricingRules = [
+  { id: "demo-rate-diagnostic", profile_version: 1, rule_code: "LAB-DIAG", label: "Diagnostic labor", line_type: "Labor", uom: "HR", reference_unit_cost: 48, recommended_unit_price: 135, evidence_count: 0, confidence: "Low", note: "DEMO PLACEHOLDER — replace with MDB-approved burden and sell rates." },
+  { id: "demo-rate-repair", profile_version: 1, rule_code: "LAB-REPAIR", label: "Repair labor", line_type: "Labor", uom: "HR", reference_unit_cost: 48, recommended_unit_price: 125, evidence_count: 0, confidence: "Low", note: "DEMO PLACEHOLDER — replace with MDB-approved burden and sell rates." },
+  { id: "demo-rate-test", profile_version: 1, rule_code: "LAB-TEST", label: "Function test and commissioning", line_type: "Labor", uom: "HR", reference_unit_cost: 48, recommended_unit_price: 115, evidence_count: 0, confidence: "Low", note: "DEMO PLACEHOLDER — replace with MDB-approved burden and sell rates." },
+  { id: "demo-rate-field", profile_version: 1, rule_code: "FIELD-MOB", label: "Field mobilization planning allowance", line_type: "Travel", uom: "EA", reference_unit_cost: 85, recommended_unit_price: 250, evidence_count: 0, confidence: "Low", note: "DEMO PLACEHOLDER — estimator must replace with actual travel basis." },
+];
+
+const serviceEstimateRecipes = [
+  { family: "Hydraulics", keywords: ["hydraulic", "cylinder", "hose", "valve", "drift", "pressure"], diagnosticHours: 2.5, repairHours: 5, testHours: 1.5 },
+  { family: "Rotary Head / Drive", keywords: ["rotary", "head", "torque", "spindle", "drive"], diagnosticHours: 3, repairHours: 8, testHours: 2 },
+  { family: "Feed / Mast", keywords: ["feed", "mast", "chain", "carriage", "slide"], diagnosticHours: 2.5, repairHours: 6, testHours: 1.5 },
+  { family: "Electrical / Controls", keywords: ["electrical", "control", "wiring", "sensor", "switch", "display"], diagnosticHours: 3, repairHours: 5, testHours: 2 },
+  { family: "Engine / Power", keywords: ["engine", "power", "fuel", "cooling", "start"], diagnosticHours: 3, repairHours: 6, testHours: 2 },
+  { family: "Winch / Hoist", keywords: ["winch", "hoist", "cable", "drum"], diagnosticHours: 2.5, repairHours: 6, testHours: 2 },
+  { family: "Structural / Fabrication", keywords: ["crack", "weld", "frame", "structural", "fabrication"], diagnosticHours: 2, repairHours: 8, testHours: 1.5 },
+  { family: "General / Inspection", keywords: [], diagnosticHours: 3, repairHours: 4, testHours: 1.5 },
+];
+
+function serviceEstimateLineKey() {
+  return globalThis.crypto?.randomUUID ? `sel-${crypto.randomUUID()}` : `sel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function servicePricingRule(code) {
+  return state.servicePricingRules.find((rule) => (rule.rule_code || rule.ruleCode) === code)
+    || (isPublicDemo ? demoServicePricingRules.find((rule) => rule.rule_code === code) : null);
+}
+
+function detectServiceEstimateRecipe(request) {
+  const context = normalize(`${request?.complaint || ""} ${request?.requested_work || ""} ${request?.rig_model || ""}`);
+  return serviceEstimateRecipes.find((recipe) => recipe.keywords.some((keyword) => context.includes(keyword)))
+    || serviceEstimateRecipes[serviceEstimateRecipes.length - 1];
+}
+
+function recommendedServiceConfidence(request, recipe) {
+  const facts = [request?.production_serial || request?.asset_id, request?.rig_model, request?.drill_hours, request?.complaint, request?.requested_work].filter(Boolean).length;
+  if (facts >= 5 && recipe.family !== "General / Inspection") return "High";
+  if (facts >= 3) return "Medium";
+  return "Low";
+}
+
+function recommendedServiceLine(code, description, quantity, confidence) {
+  const rule = servicePricingRule(code);
+  return {
+    id: serviceEstimateLineKey(), line_type: rule?.line_type || "Labor", code,
+    description, quantity, uom: rule?.uom || "HR",
+    unit_cost: Number(rule?.reference_unit_cost || 0), unit_price: Number(rule?.recommended_unit_price || 0),
+    reference_unit_cost: Number(rule?.reference_unit_cost || 0), reference_unit_price: Number(rule?.recommended_unit_price || 0),
+    source_type: rule ? "Rate Card" : "Manual", source_reference: rule ? `Service profile v${rule.profile_version} · ${code}` : "No approved MDB pricing rule loaded",
+    confidence: rule?.evidence_count ? confidence : "Low", override_reason: "", is_optional: false,
+  };
+}
+
+function createRecommendedServiceEstimate(request, existingId = "") {
+  const recipe = detectServiceEstimateRecipe(request);
+  const confidence = recommendedServiceConfidence(request, recipe);
+  const estimateId = existingId || `demo-estimate-${request.id}`;
+  const lines = [
+    recommendedServiceLine("LAB-DIAG", `${recipe.family} diagnosis and documented findings`, recipe.diagnosticHours, confidence),
+    recommendedServiceLine("LAB-REPAIR", `${recipe.family} repair allowance`, recipe.repairHours, confidence),
+    recommendedServiceLine("LAB-TEST", "Function test, verification, and service documentation", recipe.testHours, confidence),
+  ];
+  if ((request.service_mode || "Unknown") === "Field") {
+    lines.push(recommendedServiceLine("FIELD-MOB", "Field mobilization planning allowance — estimator must verify distance and travel basis", 1, "Low"));
+  }
+  lines.push({
+    id: serviceEstimateLineKey(), line_type: "Part", code: "PARTS-PENDING", description: "Parts pending qualified estimator selection",
+    quantity: 1, uom: "EA", unit_cost: 0, unit_price: 0, reference_unit_cost: 0, reference_unit_price: 0,
+    source_type: "Inspection", source_reference: "No part selected; excluded from quoted total", confidence: "Low", override_reason: "", is_optional: true,
+  });
+  const estimate = {
+    id: estimateId, estimate_number: isPublicDemo ? `SEST-DEMO-${String(state.serviceEstimates.length + 1).padStart(3, "0")}` : "Pending number",
+    service_request_id: request.id, revision: 1, status: "Draft", estimator_user_id: isPublicDemo ? "demo-service-estimator-a" : (state.operationsActor?.id || ""),
+    diagnostic_family: recipe.family,
+    customer_scope: `Diagnose the reported ${request.complaint || request.requested_work || "service condition"}; complete the approved repair allowance; function-test the affected system; and document findings and work performed.`,
+    assumptions: "Recommendation is based on the supplied complaint and rig context. Final parts are selected by a qualified estimator; additional concealed damage requires a revised approval.",
+    exclusions: "Taxes, expedited freight, crane/rigging, third-party work, and concealed damage are excluded unless listed as estimate lines.",
+    internal_note: "Qualified estimator must verify scope, labor, travel, parts, and every override before handoff.",
+    pricing_profile_version: state.servicePricingRules.reduce((highest, rule) => Math.max(highest, Number(rule.profile_version || 0)), 0) || (isPublicDemo ? 1 : null),
+    recommendation_basis: isPublicDemo
+      ? `${recipe.family} intake pattern + service mode + placeholder profile v1. No completed MDB estimate-versus-actual history is loaded yet.`
+      : `${recipe.family} intake pattern + service mode. No approved matching rate is loaded for any line labeled Manual.`,
+    recommendation_confidence: confidence, return_note: "", created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+  };
+  return { estimate, lines };
+}
+
+function serviceEstimateLinesFor(estimate) {
+  return state.serviceEstimateLines.filter((line) => line.service_estimate_id === estimate?.id)
+    .sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0));
+}
+
+function latestServiceEstimateForRequest(request) {
+  return state.serviceEstimates.filter((estimate) => estimate.service_request_id === request?.id)
+    .sort((a, b) => Number(b.revision || 0) - Number(a.revision || 0))[0] || null;
+}
+
+function serviceEstimateTotals(estimate) {
+  const lines = serviceEstimateLinesFor(estimate);
+  const totalFor = (types) => lines.filter((line) => types.includes(line.line_type)).reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unit_cost || 0), 0);
+  const totalCost = lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unit_cost || 0), 0);
+  const quotedPrice = lines.filter((line) => !line.is_optional).reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unit_price || 0), 0);
+  const grossProfit = quotedPrice - totalCost;
+  return {
+    laborCost: totalFor(["Labor"]), materialCost: totalFor(["Part", "Shop Supply"]),
+    outsideCost: totalFor(["Outside", "Contingency"]), travelCost: totalFor(["Travel"]),
+    totalCost, quotedPrice, grossProfit, margin: quotedPrice > 0 ? (grossProfit / quotedPrice) * 100 : 0,
+  };
+}
+
+function syncServiceEstimateRollup(estimate) {
+  const totals = serviceEstimateTotals(estimate);
+  Object.assign(estimate, {
+    labor_cost: totals.laborCost, material_cost: totals.materialCost, outside_cost: totals.outsideCost,
+    travel_cost: totals.travelCost, total_cost: totals.totalCost, quoted_price: totals.quotedPrice,
+    gross_profit: totals.grossProfit, gross_margin_pct: totals.margin, updated_at: new Date().toISOString(),
+  });
+  return totals;
+}
+
+function addRecommendedEstimateToState(request, status = "Draft", estimateId = "") {
+  const { estimate, lines } = createRecommendedServiceEstimate(request, estimateId);
+  estimate.status = status;
+  if (status === "Approved") estimate.approved_at = operationsDemoTimestamp(-4, 11);
+  state.serviceEstimates.push(estimate);
+  lines.forEach((line, index) => state.serviceEstimateLines.push({ ...line, service_estimate_id: estimate.id, sequence: index + 1 }));
+  syncServiceEstimateRollup(estimate);
+  return estimate;
+}
+
+function ensureDemoServiceEstimating() {
+  if (!isPublicDemo) return;
+  demoServicePricingRules.forEach((rule) => {
+    if (!state.servicePricingRules.some((entry) => entry.id === rule.id)) state.servicePricingRules.push({ ...rule });
+  });
+  const waitingRequest = state.serviceRequests.find((request) => request.id === "demo-service-request-machine-down");
+  if (waitingRequest && !latestServiceEstimateForRequest(waitingRequest)) addRecommendedEstimateToState(waitingRequest);
+  const completedRequest = state.serviceRequests.find((request) => request.id === "demo-service-request-scheduled");
+  if (completedRequest && !latestServiceEstimateForRequest(completedRequest)) {
+    const approved = addRecommendedEstimateToState(completedRequest, "Approved", "demo-estimate-approved");
+    approved.estimator_user_id = "demo-service-estimator-b";
+  }
+  const workOrder = state.serviceWorkOrders.find((entry) => entry.id === "demo-service-work-order");
+  if (workOrder && !state.serviceActualCosts.some((entry) => entry.service_work_order_id === workOrder.id)) {
+    state.serviceActualCosts.push(
+      { id: 1, service_work_order_id: workOrder.id, line_type: "Labor", description: "Technician time captured", quantity: 8.5, uom: "HR", unit_cost: 48, extended_cost: 408, source_type: "Time Entry", source_reference: "Portfolio sample", occurred_on: new Date().toISOString().slice(0, 10) },
+      { id: 2, service_work_order_id: workOrder.id, line_type: "Part", description: "Hydraulic repair material", quantity: 1, uom: "EA", unit_cost: 286, extended_cost: 286, source_type: "Inventory", source_reference: "Portfolio sample", occurred_on: new Date().toISOString().slice(0, 10) },
+    );
+  }
+}
+
 function ensureDemoOperationsResources() {
   const requiredCenters = [
     { id: "service-bay-1", code: "SB-01", name: "Service Bay 1", center_type: "service_bay", capacity: 1 },
@@ -751,6 +915,8 @@ function ensureDemoOperationsResources() {
   });
 
   const requiredUsers = [
+    { id: "demo-service-estimator-a", display_name: "Qualified Estimator A", initials: "EA", operational_user_roles: [{ role: "service_estimator" }] },
+    { id: "demo-service-estimator-b", display_name: "Qualified Estimator B", initials: "EB", operational_user_roles: [{ role: "service_estimator" }] },
     { id: "demo-service-controller", display_name: "Service Controller", initials: "SC", operational_user_roles: [{ role: "service_controller" }] },
     { id: "demo-production-controller", display_name: "Production Controller", initials: "PC", operational_user_roles: [{ role: "production_controller" }] },
     { id: "demo-service-technician", display_name: "Service Technician", initials: "TECH", operational_user_roles: [{ role: "service_technician" }] },
@@ -767,6 +933,7 @@ function ensureOperationsDemo() {
   if (!isPublicDemo) return;
   ensureDemoOperationsResources();
   if (state.serviceRequests.length || state.operationsJobs.length) {
+    ensureDemoServiceEstimating();
     saveOperationsSnapshot();
     return;
   }
@@ -832,6 +999,7 @@ function ensureOperationsDemo() {
     event_key: "demo-oje-1", job_id: "demo-service-job-scheduled", event_type: "Scheduled",
     summary: "Service Bay 1 committed", detail: "Scheduled against bay capacity.", created_at: operationsDemoTimestamp(-2, 14),
   }];
+  ensureDemoServiceEstimating();
   saveOperationsSnapshot();
 }
 
@@ -846,6 +1014,7 @@ async function loadOperations() {
     const response = await fetch("/api/operations/jobs", { headers: { Accept: "application/json" } });
     if (!response.ok) throw new Error(`Operations API returned ${response.status}`);
     const payload = await response.json();
+    state.operationsActor = payload.actor || null;
     applyOperationsSnapshot(payload);
     state.operationsBackendConfigured = true;
   } catch {
@@ -870,6 +1039,7 @@ async function postOperationsAction(payload) {
 
 function renderActiveOperationsWorkspace() {
   if (state.activeWorkspace === "serviceRequests") renderServiceRequestsWorkspace();
+  if (state.activeWorkspace === "serviceEstimating") renderServiceEstimatingWorkspace();
   if (state.activeWorkspace === "operationsBoard") renderOperationsBoardWorkspace();
 }
 
@@ -2435,7 +2605,7 @@ function openWorkspace(type, options = {}) {
   const customer = customers.find((item) => item.id === state.selectedCustomerId);
   elements.overlayEyebrow.textContent = type === "customerTooling" ? customer?.name || "Customer" : "MDB";
   const titles = {
-    items: "Items", tooling: "Tooling", customerTooling: "Customer Tooling", quotes: "Quote Builder", orders: "Orders", buildRequests: "Build Requests", serviceRequests: "Service Requests", operationsBoard: "Operations Board", productionControl: "Production Control", builds: "Build Orders", inventory: "Inventory", bom: "Rig / BOM View", rigSpecs: "Rig Specifications",
+    items: "Items", tooling: "Tooling", customerTooling: "Customer Tooling", quotes: "Quote Builder", orders: "Orders", buildRequests: "Build Requests", serviceRequests: "Service Requests", serviceEstimating: "Service Estimating", operationsBoard: "Operations Board", productionControl: "Production Control", builds: "Build Orders", inventory: "Inventory", bom: "Rig / BOM View", rigSpecs: "Rig Specifications",
     calibration: "Calibration", rigSales: "Rig Sales", prospects: "New Prospect Search", callList: "Daily Call List",
     calibrationTraining: "Calibration Training", workflowTraining: "Workflow Training",
     reports: "Sales Reports", systemSync: "System & Sync",
@@ -2455,6 +2625,7 @@ function openWorkspace(type, options = {}) {
   if (type === "orders") { renderOrdersWorkspace(); if (state.ordersBackendConfigured) loadOrders().then(() => { if (state.activeWorkspace === "orders") renderOrdersWorkspace(); }); }
   if (type === "buildRequests") renderBuildRequestsWorkspace();
   if (type === "serviceRequests") renderServiceRequestsWorkspace();
+  if (type === "serviceEstimating") renderServiceEstimatingWorkspace(options);
   if (type === "operationsBoard") renderOperationsBoardWorkspace();
   if (type === "productionControl") renderProductionControlWorkspace();
   if (type === "builds") { renderBuildsWorkspace(); if (state.buildsBackendConfigured) loadBuilds().then(() => { if (state.activeWorkspace === "builds") renderBuildsWorkspace(); }); }
@@ -3582,7 +3753,12 @@ function serviceRequestStage(request) {
   if (request.status === "Resolved") return "Complete";
   if (["Needs Information", "Returned"].includes(request.status)) return "Needs Information";
   if (request.status === "Draft") return "Draft";
-  if (request.status === "Submitted") return "Waiting on Gatekeeper";
+  if (request.status === "Submitted") {
+    const estimate = latestServiceEstimateForRequest(request);
+    if (estimate?.status === "Submitted") return "Estimate Ready";
+    if (["Draft", "Returned"].includes(estimate?.status)) return "Estimating";
+    return "Waiting on Estimate";
+  }
   if (request.status === "Triaged") return "Triaged";
   if (request.status === "Accepted") return "Accepted";
   const job = operationsJobForRequest(request);
@@ -3599,8 +3775,8 @@ function serviceRequestStage(request) {
 function serviceRequestStageIndex(request) {
   const stage = serviceRequestStage(request);
   if (["Draft", "Needs Information"].includes(stage)) return 0;
-  if (["Waiting on Gatekeeper", "Triaged"].includes(stage)) return 1;
-  if (["Accepted", "Order Setup Pending"].includes(stage)) return 2;
+  if (["Waiting on Estimate", "Estimating"].includes(stage)) return 1;
+  if (["Estimate Ready", "Triaged", "Accepted", "Order Setup Pending"].includes(stage)) return 2;
   if (stage === "Scheduled") return 3;
   if (["Released", "Work in Progress", "Blocked", "On Hold", "Work Complete", "Signoff Complete"].includes(stage)) return 4;
   if (stage === "Complete") return 5;
@@ -3609,7 +3785,7 @@ function serviceRequestStageIndex(request) {
 
 function serviceLifecycleHtml(request) {
   const activeIndex = serviceRequestStageIndex(request);
-  const steps = ["Requested", "Gatekeeper", "Accepted", "Scheduled", "Service", "Closed"];
+  const steps = ["Requested", "Estimate", "Gatekeeper", "Scheduled", "Service", "Closed"];
   return `<div class="request-lifecycle" aria-label="Service Request lifecycle">${steps.map((step, index) => `<div class="${index < activeIndex ? "is-complete" : index === activeIndex ? "is-current" : ""}"><span>${index < activeIndex ? "✓" : index + 1}</span><small>${step}</small></div>`).join("")}</div>`;
 }
 
@@ -3619,11 +3795,26 @@ function serviceRequestEventsHtml(request) {
   return events.slice(0, 8).map((event) => `<div class="request-event"><span></span><div><strong>${escapeHTML(event.summary)}</strong><small>${operationDateTime(event.created_at)} · ${escapeHTML(event.actor_name || "MDB workflow")}</small>${event.detail ? `<p>${escapeHTML(event.detail)}</p>` : ""}</div></div>`).join("") || '<p class="quote-list-empty">No request activity yet.</p>';
 }
 
+function serviceEstimateGatekeeperHtml(request, estimate) {
+  if (!estimate || ["Draft", "Returned"].includes(estimate.status)) {
+    return `<div class="gatekeeper-decision service-estimate-gate"><strong>Qualified Service Estimate ${estimate ? estimate.status.toLowerCase() : "not started"}.</strong><p>The Gatekeeper cannot set a billable price from an unreviewed worksheet. A qualified estimator must scan scope, cost, sell price, source confidence, and overrides first. Warranty or confirmed non-billable work may still be classified without a customer quote.</p>${estimate?.return_note ? `<div class="request-exception"><strong>Returned for revision</strong><span>${escapeHTML(estimate.return_note)}</span></div>` : ""}<label class="gatekeeper-note"><span>Information / non-billable classification note</span><input data-service-note="${request.id}" placeholder="Required context for requester or warranty path..."></label><div class="button-row"><button type="button" class="secondary-button" data-service-transition="needs_information" data-service-request-id="${request.id}">Needs Information</button><button type="button" class="secondary-button" data-service-transition="triage" data-service-request-id="${request.id}">Warranty / Non-Billable Triage</button><button type="button" class="primary-button" data-open-service-estimate="${request.id}">${estimate ? "Open Estimator Worksheet" : "Start Qualified Estimate"}</button></div></div>`;
+  }
+  if (estimate.status === "Submitted") {
+    const totals = serviceEstimateTotals(estimate);
+    const estimator = state.operationalUsers.find((user) => user.id === estimate.estimator_user_id);
+    return `<div class="gatekeeper-decision service-estimate-gate is-ready"><header><div><span>LOCKED ESTIMATOR PACKAGE</span><strong>${escapeHTML(estimate.estimate_number)} · Revision ${estimate.revision}</strong><small>${escapeHTML(estimator?.display_name || "Qualified estimator")} · ${escapeHTML(estimate.recommendation_confidence)} confidence</small></div><b>${formatCurrency(totals.quotedPrice)}</b></header>
+      <div class="service-gate-economics"><div><span>Estimated cost</span><strong>${formatCurrency(totals.totalCost)}</strong></div><div><span>Gross margin</span><strong>${totals.margin.toFixed(1)}%</strong></div><div><span>Service family</span><strong>${escapeHTML(estimate.diagnostic_family)}</strong></div></div>
+      <p><strong>Quoted scope:</strong> ${escapeHTML(estimate.customer_scope)}</p>
+      <details><summary>Recommendation basis, assumptions, and exclusions</summary><p><strong>Basis:</strong> ${escapeHTML(estimate.recommendation_basis)}</p><p><strong>Assumptions:</strong> ${escapeHTML(estimate.assumptions)}</p><p><strong>Exclusions:</strong> ${escapeHTML(estimate.exclusions)}</p></details>
+      <label class="gatekeeper-note"><span>Gatekeeper approval / return note</span><input data-service-estimate-review-note="${request.id}" placeholder="Commercial or routing decision context..."></label>
+      <div class="button-row"><button type="button" class="secondary-button" data-service-estimate-review="return" data-service-request-id="${request.id}">Return to Estimator</button><button type="button" class="primary-button" data-service-estimate-review="approve" data-service-request-id="${request.id}">Approve Estimate &amp; Triage</button></div>
+    </div>`;
+  }
+  return "";
+}
+
 function serviceGatekeeperDecisionHtml(request) {
-  if (request.status === "Submitted") return `<div class="gatekeeper-decision">
-    <label class="gatekeeper-note"><span>Triage note / information needed</span><input data-service-note="${request.id}" placeholder="Record the decision context before routing..."></label>
-    <div class="button-row"><button type="button" class="secondary-button" data-service-transition="needs_information" data-service-request-id="${request.id}">Needs Information</button><button type="button" class="primary-button" data-service-transition="triage" data-service-request-id="${request.id}">Triage Request</button></div>
-  </div>`;
+  if (request.status === "Submitted") return serviceEstimateGatekeeperHtml(request, latestServiceEstimateForRequest(request));
   if (request.status === "Triaged") return `<div class="gatekeeper-decision">
     <div class="gatekeeper-fields">
       <label><span>Financial path</span><select data-service-financial="${request.id}">${["Unknown", "Warranty", "Billable"].map((value) => `<option ${value === request.financial_class ? "selected" : ""}>${value}</option>`).join("")}</select></label>
@@ -3790,23 +3981,229 @@ async function transitionServiceRequest(request, action, card) {
 
 function renderServiceRequestsWorkspace() {
   const requests = [...state.serviceRequests].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  const active = requests.filter((request) => !["Resolved", "Cancelled"].includes(request.status));
   elements.overlayBody.innerHTML = `<div class="workbench production-workbench service-workbench">
     <div class="operations-toolbar"><div><strong>Service Requests</strong><span>Fast intake and transparent tracking for office, field, and future Mobile Lite/NFC entry.</span></div><button type="button" class="primary-button" data-service-new>New Service Request</button></div>
     <div class="production-boundary"><span>REQUESTER VIEW</span><strong>A request documents a need; it does not promise service work.</strong><p>The service gatekeeper owns triage, financial classification, mode, priority, assignment, scheduling, and conversion. Requesters can follow every controlled stage without editing the Service Work Order.</p></div>
     <div class="order-metric-grid">
-      <div><span>Waiting on gatekeeper</span><strong>${requests.filter((request) => request.status === "Submitted").length}</strong></div>
+      <div><span>Being estimated</span><strong>${requests.filter((request) => request.status === "Submitted" && latestServiceEstimateForRequest(request)?.status !== "Submitted").length}</strong></div>
+      <div><span>Ready for gatekeeper</span><strong>${requests.filter((request) => latestServiceEstimateForRequest(request)?.status === "Submitted").length}</strong></div>
       <div><span>Needs information</span><strong>${requests.filter((request) => ["Needs Information", "Returned"].includes(request.status)).length}</strong></div>
       <div><span>Controlled work</span><strong>${requests.filter((request) => request.status === "Converted").length}</strong></div>
-      <div><span>Open requests</span><strong>${active.length}</strong></div>
     </div>
     ${renderServiceRequestEditor()}
     <section class="request-card-list">${requests.map((request) => serviceRequestCardHtml(request, "requester")).join("") || '<div class="request-empty-state"><strong>No Service Requests yet.</strong><p>Use one when a rig, field crew, or customer needs office-controlled service action.</p></div>'}</section>
   </div>`;
 }
 
+function ensureServiceEstimateDraft(request) {
+  const existing = latestServiceEstimateForRequest(request);
+  if (existing) return existing;
+  if (!isPublicDemo && !state.operationsActor?.roles?.includes("service_estimator")) return null;
+  return addRecommendedEstimateToState(request);
+}
+
+function serviceEstimateCompleteness(request, estimate) {
+  const lines = serviceEstimateLinesFor(estimate);
+  const totals = serviceEstimateTotals(estimate);
+  const overrideGaps = lines.filter((line) => (
+    Number(line.unit_cost) !== Number(line.reference_unit_cost)
+    || Number(line.unit_price) !== Number(line.reference_unit_price)
+  ) && !String(line.override_reason || "").trim());
+  const checks = [
+    [Boolean(request.production_serial || request.asset_id), "Rig / asset identity"],
+    [Boolean(request.complaint || request.requested_work), "Observed condition"],
+    [Boolean(estimate.diagnostic_family), "Service family"],
+    [Boolean(String(estimate.customer_scope || "").trim()), "Customer-facing scope"],
+    [lines.some((line) => line.line_type === "Labor"), "Labor basis"],
+    [totals.quotedPrice > 0, "Positive quoted price"],
+    [lines.every((line) => String(line.description || "").trim() && Number(line.quantity) > 0), "Complete estimate lines"],
+    [overrideGaps.length === 0, "Override reasons"],
+  ];
+  return { checks, complete: checks.every(([ready]) => ready), readyCount: checks.filter(([ready]) => ready).length, overrideGaps };
+}
+
+function serviceEstimateSummaryHtml(request, estimate) {
+  const totals = syncServiceEstimateRollup(estimate);
+  const completeness = serviceEstimateCompleteness(request, estimate);
+  const actualWorkOrder = serviceWorkOrderForRequest(request);
+  const actualCost = actualWorkOrder ? state.serviceActualCosts.filter((entry) => entry.service_work_order_id === actualWorkOrder.id)
+    .reduce((sum, entry) => sum + Number(entry.extended_cost ?? (Number(entry.quantity) * Number(entry.unit_cost))), 0) : 0;
+  return `<aside class="service-estimate-summary" id="serviceEstimateSummary">
+    <header><div><span>PRICE EXPLAINER</span><h3>Estimate economics</h3></div><b class="request-stage is-${slugify(estimate.status)}">${escapeHTML(estimate.status)}</b></header>
+    <div class="service-cost-stack">
+      <div><span>Labor cost</span><strong>${formatCurrency(totals.laborCost)}</strong></div>
+      <div><span>Parts / supplies cost</span><strong>${formatCurrency(totals.materialCost)}</strong></div>
+      <div><span>Travel / outside cost</span><strong>${formatCurrency(totals.travelCost + totals.outsideCost)}</strong></div>
+      <div class="is-total"><span>Total estimated cost</span><strong>${formatCurrency(totals.totalCost)}</strong></div>
+      <div class="is-price"><span>Recommended quote</span><strong>${formatCurrency(totals.quotedPrice)}</strong></div>
+      <div><span>Gross profit / margin</span><strong>${formatCurrency(totals.grossProfit)} · ${totals.margin.toFixed(1)}%</strong></div>
+      ${actualWorkOrder ? `<div class="is-actual"><span>Actual cost captured</span><strong>${formatCurrency(actualCost)}</strong></div>` : ""}
+    </div>
+    <div class="service-confidence"><span>Recommendation confidence</span><strong>${escapeHTML(estimate.recommendation_confidence || "Low")}</strong><p>${escapeHTML(estimate.recommendation_basis || "No recommendation basis recorded.")}</p></div>
+    <div class="service-completeness"><header><strong>Handoff readiness</strong><span>${completeness.readyCount}/${completeness.checks.length}</span></header>${completeness.checks.map(([ready, label]) => `<div class="${ready ? "is-ready" : "is-missing"}"><span>${ready ? "✓" : "!"}</span>${escapeHTML(label)}</div>`).join("")}</div>
+    <p class="service-rate-warning"><strong>Rate warning:</strong> ${isPublicDemo ? "portfolio values are placeholders until MDB approves labor burden, sell rates, travel rules, margin bands, and historical evidence." : "only approved service-pricing rules may prefill values. Lines marked Manual have no approved rate and must be completed by a qualified estimator with an override reason."}</p>
+  </aside>`;
+}
+
+function serviceEstimateLineHtml(line, locked) {
+  const overridden = Number(line.unit_cost) !== Number(line.reference_unit_cost) || Number(line.unit_price) !== Number(line.reference_unit_price);
+  const lineTypes = ["Labor", "Part", "Travel", "Outside", "Shop Supply", "Contingency"];
+  return `<div class="service-estimate-line ${line.is_optional ? "is-optional" : ""}" data-service-estimate-line="${line.id}">
+    <select data-service-estimate-line-field="line_type" aria-label="Line type" ${locked ? "disabled" : ""}>${lineTypes.map((type) => `<option ${type === line.line_type ? "selected" : ""}>${type}</option>`).join("")}</select>
+    <div class="service-estimate-description"><input data-service-estimate-line-field="code" value="${escapeHTML(line.code || "")}" placeholder="Part / rate code" ${locked ? "disabled" : ""}><input data-service-estimate-line-field="description" value="${escapeHTML(line.description)}" placeholder="Work, part, or outside service" ${locked ? "disabled" : ""}></div>
+    <div class="service-estimate-quantity"><input type="number" min="0.01" step="0.25" data-service-estimate-line-field="quantity" value="${Number(line.quantity)}" ${locked ? "disabled" : ""}><input data-service-estimate-line-field="uom" value="${escapeHTML(line.uom || "EA")}" ${locked ? "disabled" : ""}></div>
+    <input type="number" min="0" step="0.01" data-service-estimate-line-field="unit_cost" value="${Number(line.unit_cost)}" aria-label="Unit cost" ${locked ? "disabled" : ""}>
+    <input type="number" min="0" step="0.01" data-service-estimate-line-field="unit_price" value="${Number(line.unit_price)}" aria-label="Unit sell price" ${locked ? "disabled" : ""}>
+    <div class="service-estimate-source"><strong>${escapeHTML(line.source_type || "Manual")} · ${escapeHTML(line.confidence || "Low")}</strong><small>${escapeHTML(line.source_reference || "No structured source")}</small></div>
+    <input class="${overridden && !line.override_reason ? "needs-reason" : ""}" data-service-estimate-line-field="override_reason" value="${escapeHTML(line.override_reason || "")}" placeholder="${overridden ? "Required: why changed?" : "Override reason"}" ${locked ? "disabled" : ""}>
+    ${locked ? "" : `<button type="button" class="line-remove" data-service-estimate-line-remove="${line.id}" aria-label="Remove estimate line">×</button>`}
+  </div>`;
+}
+
+function serviceEstimateMatrixHtml(request, estimate) {
+  const actorQualified = isPublicDemo || state.operationsActor?.roles?.includes("service_estimator");
+  const locked = !actorQualified || ["Submitted", "Approved", "Superseded", "Cancelled"].includes(estimate.status);
+  const lines = serviceEstimateLinesFor(estimate);
+  const families = serviceEstimateRecipes.map((recipe) => recipe.family);
+  const estimator = state.operationalUsers.find((user) => user.id === estimate.estimator_user_id);
+  return `<section class="service-estimate-matrix">
+    <header class="service-estimate-heading"><div><span>${escapeHTML(estimate.estimate_number || "New estimate")} · Revision ${estimate.revision || 1}</span><h2>${escapeHTML(request.production_serial || request.asset_id || request.rig_model || "Service asset")}</h2><p>${escapeHTML(request.customer_name_snapshot || "Customer pending")} · ${escapeHTML(request.complaint || request.requested_work)}</p></div><div><span>QUALIFIED ESTIMATOR</span><strong>${escapeHTML(estimator?.display_name || "Assignment required")}</strong></div></header>
+    ${estimate.return_note ? `<div class="request-exception"><strong>Gatekeeper returned this estimate</strong><span>${escapeHTML(estimate.return_note)}</span></div>` : ""}
+    <div class="service-intake-strip">
+      <div><span>Rig / serial</span><strong>${escapeHTML(request.rig_model || "Unknown")} · ${escapeHTML(request.production_serial || request.asset_id || "Missing")}</strong></div>
+      <div><span>Hours / urgency</span><strong>${escapeHTML(request.drill_hours ?? "Unknown")} · ${escapeHTML(request.urgency || "Routine")}</strong></div>
+      <div><span>Mode / location</span><strong>${escapeHTML(request.service_mode || "Unknown")} · ${escapeHTML(request.service_location || "Missing")}</strong></div>
+      <div><span>Source</span><strong>${escapeHTML(request.source_channel || "Desktop")} · ${escapeHTML(request.requester_name || "Employee")}</strong></div>
+    </div>
+    <div class="service-estimate-body"><div class="service-estimate-form">
+      <section class="service-matrix-section"><header><span>01</span><div><h3>Classify the work MDB received</h3><p>The family selects a starting pattern; it does not diagnose the machine.</p></div></header>
+        <label><span>Diagnostic / service family</span><select data-service-estimate-field="diagnostic_family" ${locked ? "disabled" : ""}>${families.map((family) => `<option ${family === estimate.diagnostic_family ? "selected" : ""}>${family}</option>`).join("")}</select></label>
+        ${locked ? "" : '<button type="button" class="secondary-button" data-service-estimate-recommend>Rebuild MDB recommendation</button>'}
+      </section>
+      <section class="service-matrix-section"><header><span>02</span><div><h3>Customer-facing scope</h3><p>State what is included before assigning dollars.</p></div></header>
+        <label><span>Scope to quote</span><textarea rows="4" data-service-estimate-field="customer_scope" ${locked ? "disabled" : ""}>${escapeHTML(estimate.customer_scope || "")}</textarea></label>
+        <div class="service-estimate-text-pair"><label><span>Assumptions</span><textarea rows="3" data-service-estimate-field="assumptions" ${locked ? "disabled" : ""}>${escapeHTML(estimate.assumptions || "")}</textarea></label><label><span>Exclusions</span><textarea rows="3" data-service-estimate-field="exclusions" ${locked ? "disabled" : ""}>${escapeHTML(estimate.exclusions || "")}</textarea></label></div>
+      </section>
+      <section class="service-matrix-section service-line-section"><header><span>03</span><div><h3>Cost and quote matrix</h3><p>Reference cost and sell rate stay visible; every override requires a reason.</p></div>${locked ? "" : '<button type="button" class="secondary-button" data-service-estimate-add-line>Add line</button>'}</header>
+        <div class="service-estimate-line service-estimate-line--header"><span>Type</span><span>Code / work / part</span><span>Qty / UOM</span><span>Unit cost</span><span>Unit sell</span><span>Source</span><span>Override reason</span><span></span></div>
+        <div id="serviceEstimateLines">${lines.map((line) => serviceEstimateLineHtml(line, locked)).join("")}</div>
+      </section>
+      <section class="service-matrix-section"><header><span>04</span><div><h3>Qualified scan and handoff</h3><p>Capture what the gatekeeper needs to understand risk and exceptions.</p></div></header>
+        <label><span>Internal estimator note</span><textarea rows="3" data-service-estimate-field="internal_note" ${locked ? "disabled" : ""}>${escapeHTML(estimate.internal_note || "")}</textarea></label>
+        ${state.serviceEstimateError ? `<p class="form-error">${escapeHTML(state.serviceEstimateError)}</p>` : ""}
+        <div class="button-row">${locked ? (!actorQualified ? '<span class="status-label status-label--warn">Read-only: qualified estimator role required</span>' : estimate.status === "Submitted" ? '<span class="status-label status-label--warn">Locked while Gatekeeper reviews</span>' : '<span class="status-label status-label--good">Approved package is read-only</span>') : '<button type="button" class="secondary-button" data-service-estimate-save>Save Draft</button><button type="button" class="primary-button" data-service-estimate-submit>Submit to Gatekeeper</button>'}</div>
+      </section>
+    </div>${serviceEstimateSummaryHtml(request, estimate)}</div>
+  </section>`;
+}
+
+function renderServiceEstimatingWorkspace(options = {}) {
+  const candidates = state.serviceRequests.filter((request) => !["Resolved", "Cancelled"].includes(request.status))
+    .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+  if (options.requestId) state.serviceEstimateSelectedRequestId = options.requestId;
+  if (!candidates.some((request) => request.id === state.serviceEstimateSelectedRequestId)) state.serviceEstimateSelectedRequestId = candidates[0]?.id || "";
+  const request = candidates.find((entry) => entry.id === state.serviceEstimateSelectedRequestId) || null;
+  const estimate = request ? ensureServiceEstimateDraft(request) : null;
+  const qualified = state.operationalUsers.filter((user) => (user.operational_user_roles || []).some((entry) => entry.role === "service_estimator"));
+  elements.overlayBody.innerHTML = `<div class="workbench service-estimating-workbench">
+    <div class="operations-toolbar"><div><strong>Service Estimating</strong><span>Qualified estimators turn incoming service evidence into an explainable quote package for Gatekeeper review.</span></div><button type="button" class="secondary-button" data-open-operations-board>Open Gatekeeper Board</button></div>
+    <div class="production-boundary is-controller"><span>QUALIFIED COMMERCIAL CONTROL</span><strong>Only assigned Service Estimators build or change service quotes.</strong><p>MDB proposes scope and structured rates from known inputs. One of the qualified estimators scans every line, documents overrides, and submits a locked package. The Gatekeeper approves or returns it; execution still belongs to the Service Work Order.</p></div>
+    <div class="service-estimator-seat-strip"><div><span>Configured estimator seats</span><strong>${qualified.length || 0}</strong></div>${qualified.map((user) => `<div><span>${escapeHTML(user.initials || "SE")}</span><strong>${escapeHTML(user.display_name)}</strong><small>Qualified Service Estimator</small></div>`).join("") || '<div><strong>Employee assignment required</strong><small>Add the two qualified employees to the service_estimator role.</small></div>'}</div>
+    <div class="service-estimating-layout"><aside class="service-estimate-queue"><header><strong>Estimate queue</strong><span>${candidates.length}</span></header>${candidates.map((entry) => { const item = latestServiceEstimateForRequest(entry); return `<button type="button" data-service-estimate-request="${entry.id}" class="${entry.id === request?.id ? "is-active" : ""}"><span><strong>${escapeHTML(entry.request_number || entry.id)}</strong><small>${escapeHTML(entry.production_serial || entry.asset_id || entry.rig_model || "Asset missing")}</small></span><b class="request-stage is-${slugify(item?.status || "Not Started")}">${escapeHTML(item?.status || "Not Started")}</b></button>`; }).join("") || '<div class="request-empty-state"><strong>No service demand is waiting.</strong></div>'}</aside>
+      <div class="service-estimate-workspace">${request && estimate ? serviceEstimateMatrixHtml(request, estimate) : '<div class="request-empty-state"><strong>Select a Service Request to estimate.</strong></div>'}</div>
+    </div>
+  </div>`;
+}
+
+function renderServiceEstimateSummaryOnly() {
+  const request = state.serviceRequests.find((entry) => entry.id === state.serviceEstimateSelectedRequestId);
+  const estimate = latestServiceEstimateForRequest(request);
+  const host = $("#serviceEstimateSummary");
+  if (host && request && estimate) host.outerHTML = serviceEstimateSummaryHtml(request, estimate);
+}
+
+function serviceEstimatePayload(estimate) {
+  return {
+    operation: "save_service_estimate", serviceRequestId: estimate.service_request_id, estimateId: estimate.id,
+    diagnosticFamily: estimate.diagnostic_family, customerScope: estimate.customer_scope,
+    assumptions: estimate.assumptions, exclusions: estimate.exclusions, internalNote: estimate.internal_note,
+    pricingProfileVersion: estimate.pricing_profile_version, recommendationBasis: estimate.recommendation_basis,
+    recommendationConfidence: estimate.recommendation_confidence,
+    lines: serviceEstimateLinesFor(estimate).map((line) => ({
+      id: line.id, lineType: line.line_type, code: line.code, description: line.description,
+      quantity: Number(line.quantity), uom: line.uom, unitCost: Number(line.unit_cost), unitPrice: Number(line.unit_price),
+      referenceUnitCost: Number(line.reference_unit_cost), referenceUnitPrice: Number(line.reference_unit_price),
+      sourceType: line.source_type, sourceReference: line.source_reference, confidence: line.confidence,
+      overrideReason: line.override_reason, isOptional: Boolean(line.is_optional),
+    })),
+  };
+}
+
+async function saveServiceEstimateFromMatrix(submit = false) {
+  const request = state.serviceRequests.find((entry) => entry.id === state.serviceEstimateSelectedRequestId);
+  const estimate = latestServiceEstimateForRequest(request);
+  if (!request || !estimate) return;
+  const readiness = serviceEstimateCompleteness(request, estimate);
+  if (submit && !readiness.complete) {
+    state.serviceEstimateError = `Complete the missing handoff checks: ${readiness.checks.filter(([ready]) => !ready).map(([, label]) => label).join(", ")}.`;
+    renderServiceEstimatingWorkspace();
+    return;
+  }
+  try {
+    syncServiceEstimateRollup(estimate);
+    if (!isPublicDemo) {
+      await postOperationsAction(serviceEstimatePayload(estimate));
+      if (submit) await postOperationsAction({ operation: "transition_service_estimate", serviceEstimateId: estimate.id, action: "submit", note: "Qualified estimator scan complete" });
+    } else {
+      estimate.status = submit ? "Submitted" : (estimate.status === "Returned" ? "Draft" : estimate.status);
+      if (submit) estimate.submitted_at = new Date().toISOString();
+      state.serviceEstimateEvents.unshift({ event_key: `see-${Date.now()}`, service_estimate_id: estimate.id, event_type: submit ? "Submitted" : "Saved", summary: submit ? "Submitted to Service Gatekeeper" : "Qualified Service Estimate saved", actor_user_id: estimate.estimator_user_id, created_at: new Date().toISOString() });
+      saveOperationsSnapshot();
+    }
+    state.serviceEstimateError = "";
+    renderServiceEstimatingWorkspace();
+    showToast(submit ? "Locked estimate package sent to the Gatekeeper" : "Service Estimate draft saved");
+  } catch (error) {
+    state.serviceEstimateError = error.message;
+    renderServiceEstimatingWorkspace();
+  }
+}
+
+async function reviewServiceEstimate(request, estimate, action, note = "") {
+  if (action === "return" && !note.trim()) { showToast("Record what the qualified estimator needs to change"); return; }
+  try {
+    if (!isPublicDemo) await postOperationsAction({ operation: "transition_service_estimate", serviceEstimateId: estimate.id, action, note });
+    else {
+      if (action === "return") { estimate.status = "Returned"; estimate.return_note = note; estimate.returned_at = new Date().toISOString(); }
+      if (action === "approve") {
+        estimate.status = "Approved"; estimate.approved_at = new Date().toISOString(); estimate.gatekeeper_user_id = "demo-service-controller";
+        request.status = "Triaged"; request.financial_class = "Billable"; request.triaged_at = estimate.approved_at;
+      }
+      state.serviceEstimateEvents.unshift({ event_key: `see-${Date.now()}`, service_estimate_id: estimate.id, event_type: action === "approve" ? "Approved" : "Returned", summary: action === "approve" ? "Approved by Service Gatekeeper" : "Returned to qualified Service Estimator", detail: note, created_at: new Date().toISOString() });
+      saveOperationsSnapshot();
+    }
+    renderOperationsBoardWorkspace();
+    showToast(action === "approve" ? "Estimate approved; Gatekeeper triage is complete" : "Estimate returned without changing the customer promise");
+  } catch (error) { showToast(error.message); }
+}
+
 function activeAssignmentForJob(job) {
   return state.operationsJobAssignments.find((assignment) => assignment.job_id === job.id && !assignment.superseded_at) || null;
+}
+
+function serviceCostTrackingHtml(request, workOrder, canRecord) {
+  if (!request || !workOrder) return "";
+  const estimate = latestServiceEstimateForRequest(request);
+  const estimateTotals = estimate ? serviceEstimateTotals(estimate) : { totalCost: 0, quotedPrice: 0 };
+  const actuals = state.serviceActualCosts.filter((entry) => entry.service_work_order_id === workOrder.id);
+  const actualCost = actuals.reduce((sum, entry) => sum + Number(entry.extended_cost ?? (Number(entry.quantity) * Number(entry.unit_cost))), 0);
+  const variance = actualCost - estimateTotals.totalCost;
+  const actualMargin = estimateTotals.quotedPrice > 0 ? ((estimateTotals.quotedPrice - actualCost) / estimateTotals.quotedPrice) * 100 : 0;
+  return `<div class="service-cost-tracking"><header><div><strong>Estimate-to-actual cost</strong><span>Structured feedback for the next service quote</span></div><b>${actuals.length} actual entr${actuals.length === 1 ? "y" : "ies"}</b></header>
+    <div class="service-cost-variance"><div><span>Approved quote</span><strong>${formatCurrency(estimateTotals.quotedPrice)}</strong></div><div><span>Estimated cost</span><strong>${formatCurrency(estimateTotals.totalCost)}</strong></div><div><span>Actual cost</span><strong>${formatCurrency(actualCost)}</strong></div><div class="${variance > 0 ? "is-over" : "is-under"}"><span>Cost variance</span><strong>${variance >= 0 ? "+" : ""}${formatCurrency(variance)} · ${actualMargin.toFixed(1)}% actual margin</strong></div></div>
+    ${actuals.length ? `<div class="service-actual-list">${actuals.slice(0, 6).map((entry) => `<div><span>${escapeHTML(entry.line_type)}</span><strong>${escapeHTML(entry.description)}</strong><small>${Number(entry.quantity)} ${escapeHTML(entry.uom)} × ${formatCurrency(entry.unit_cost)} · ${escapeHTML(entry.source_type)} ${escapeHTML(entry.source_reference || "")}</small><b>${formatCurrency(entry.extended_cost ?? (Number(entry.quantity) * Number(entry.unit_cost)))}</b></div>`).join("")}</div>` : '<p class="quote-list-empty">No actual cost has been captured yet. The pricing structure cannot learn until time, material, travel, and outside cost are recorded.</p>'}
+    ${canRecord ? `<div class="service-cost-entry"><select data-service-cost-type="${workOrder.id}">${["Labor", "Part", "Travel", "Outside", "Shop Supply", "Contingency"].map((type) => `<option>${type}</option>`).join("")}</select><input data-service-cost-description="${workOrder.id}" placeholder="Actual time, material, travel, or invoice"><input type="number" min="0.01" step="0.25" value="1" data-service-cost-quantity="${workOrder.id}" aria-label="Quantity"><input data-service-cost-uom="${workOrder.id}" value="HR" aria-label="Unit"><input type="number" min="0" step="0.01" data-service-cost-unit="${workOrder.id}" placeholder="Unit cost"><select data-service-cost-source="${workOrder.id}"><option>Time Entry</option><option>GP</option><option>Inventory</option><option>Outside Invoice</option><option>Manual</option></select><input data-service-cost-reference="${workOrder.id}" placeholder="GP doc, time entry, invoice..."><button type="button" class="secondary-button" data-service-cost-add="${workOrder.id}">Record Actual</button></div>` : ""}
+  </div>`;
 }
 
 function operationJobCardHtml(job) {
@@ -3849,6 +4246,7 @@ function operationJobCardHtml(job) {
     ${job.exception_detail ? `<div class="request-exception"><strong>${escapeHTML(job.exception_code || "Exception")}</strong><span>${escapeHTML(job.exception_detail)}</span></div>` : ""}
     ${scopeControls}${scheduleControls}
     ${operationsRoutingHtml(job)}
+    ${job.job_type === "service_job" ? serviceCostTrackingHtml(request, workOrder, controller || technician) : ""}
     <div class="checkpoint-list"><header><strong>${build ? "Specialized execution" : "Controlled checkpoints"}</strong><span>${build ? "Build Order" : `${completed} of ${checkpoints.length} complete`}</span></header>${checkpoints.map((checkpoint) => {
       const definition = state.operationsCheckpointDefinitions.find((entry) => entry.checkpoint_key === checkpoint.checkpoint_key && Number(entry.version) === Number(checkpoint.checkpoint_version));
       const ownerRole = checkpoint.owner_role || definition?.owner_role || "Shared";
@@ -3910,6 +4308,30 @@ async function establishServiceScope(job, card) {
     else { workOrder.scope_version = Number(workOrder.scope_version || 0) + 1; workOrder.scope_summary = detail; saveOperationsSnapshot(); }
     renderOperationsBoardWorkspace();
     showToast(`${workOrder.work_order_number || "Service Work Order"} scope version established`);
+  } catch (error) { showToast(error.message); }
+}
+
+async function recordServiceActualCost(workOrderId, card) {
+  const description = card?.querySelector(`[data-service-cost-description="${CSS.escape(workOrderId)}"]`)?.value.trim();
+  const quantity = Number(card?.querySelector(`[data-service-cost-quantity="${CSS.escape(workOrderId)}"]`)?.value || 0);
+  const unitCost = Number(card?.querySelector(`[data-service-cost-unit="${CSS.escape(workOrderId)}"]`)?.value || 0);
+  if (!description || quantity <= 0 || unitCost < 0) { showToast("Record a description, positive quantity, and valid unit cost"); return; }
+  const payload = {
+    operation: "record_service_actual_cost", serviceWorkOrderId: workOrderId,
+    lineType: card.querySelector(`[data-service-cost-type="${CSS.escape(workOrderId)}"]`)?.value,
+    description, quantity, uom: card.querySelector(`[data-service-cost-uom="${CSS.escape(workOrderId)}"]`)?.value || "EA",
+    unitCost, sourceType: card.querySelector(`[data-service-cost-source="${CSS.escape(workOrderId)}"]`)?.value || "Manual",
+    sourceReference: card.querySelector(`[data-service-cost-reference="${CSS.escape(workOrderId)}"]`)?.value || "",
+    occurredOn: new Date().toISOString().slice(0, 10),
+  };
+  try {
+    if (!isPublicDemo) await postOperationsAction(payload);
+    else {
+      state.serviceActualCosts.unshift({ id: Date.now(), service_work_order_id: workOrderId, line_type: payload.lineType, description, quantity, uom: payload.uom, unit_cost: unitCost, extended_cost: quantity * unitCost, source_type: payload.sourceType, source_reference: payload.sourceReference, occurred_on: payload.occurredOn });
+      saveOperationsSnapshot();
+    }
+    renderOperationsBoardWorkspace();
+    showToast("Actual service cost added to the estimate-learning record");
   } catch (error) { showToast(error.message); }
 }
 
@@ -5196,6 +5618,28 @@ function handleOverlayInput(event) {
       available.classList.toggle("is-low", count < 1);
     }
   }
+  if (target.matches("[data-service-estimate-field]")) {
+    const request = state.serviceRequests.find((entry) => entry.id === state.serviceEstimateSelectedRequestId);
+    const estimate = latestServiceEstimateForRequest(request);
+    if (estimate) {
+      estimate[target.dataset.serviceEstimateField] = target.value;
+      estimate.updated_at = new Date().toISOString();
+      state.serviceEstimateError = "";
+      renderServiceEstimateSummaryOnly();
+    }
+  }
+  if (target.matches("[data-service-estimate-line-field]")) {
+    const row = target.closest("[data-service-estimate-line]");
+    const line = state.serviceEstimateLines.find((entry) => entry.id === row?.dataset.serviceEstimateLine);
+    if (line) {
+      const field = target.dataset.serviceEstimateLineField;
+      line[field] = target.type === "number" ? Number(target.value) : target.value;
+      const overridden = Number(line.unit_cost) !== Number(line.reference_unit_cost) || Number(line.unit_price) !== Number(line.reference_unit_price);
+      row?.querySelector('[data-service-estimate-line-field="override_reason"]')?.classList.toggle("needs-reason", overridden && !String(line.override_reason || "").trim());
+      state.serviceEstimateError = "";
+      renderServiceEstimateSummaryOnly();
+    }
+  }
   if (target.matches("[data-calib-admin-notes]")) {
     const record = state.calibResults.find((item) => item.id === target.dataset.calibAdminNotes);
     if (record) { record.adminNotes = target.value; saveCalibResults(); }
@@ -5270,6 +5714,51 @@ elements.overlayBody.addEventListener("keydown", (event) => {
 });
 
 elements.overlayBody.addEventListener("click", (event) => {
+  const openServiceEstimate = event.target.closest("[data-open-service-estimate]");
+  if (openServiceEstimate) { openWorkspace("serviceEstimating", { requestId: openServiceEstimate.dataset.openServiceEstimate }); return; }
+  const estimateRequest = event.target.closest("[data-service-estimate-request]");
+  if (estimateRequest) { state.serviceEstimateSelectedRequestId = estimateRequest.dataset.serviceEstimateRequest; state.serviceEstimateError = ""; renderServiceEstimatingWorkspace(); return; }
+  if (event.target.closest("[data-service-estimate-recommend]")) {
+    const request = state.serviceRequests.find((entry) => entry.id === state.serviceEstimateSelectedRequestId);
+    const estimate = latestServiceEstimateForRequest(request);
+    if (request && estimate) {
+      const recommendation = createRecommendedServiceEstimate(request, estimate.id);
+      Object.assign(estimate, recommendation.estimate, { id: estimate.id, estimate_number: estimate.estimate_number, revision: estimate.revision, status: estimate.status, estimator_user_id: estimate.estimator_user_id });
+      state.serviceEstimateLines = state.serviceEstimateLines.filter((line) => line.service_estimate_id !== estimate.id);
+      recommendation.lines.forEach((line, index) => state.serviceEstimateLines.push({ ...line, service_estimate_id: estimate.id, sequence: index + 1 }));
+      renderServiceEstimatingWorkspace();
+      showToast("MDB recommendation rebuilt from the current service intake");
+    }
+    return;
+  }
+  if (event.target.closest("[data-service-estimate-add-line]")) {
+    const request = state.serviceRequests.find((entry) => entry.id === state.serviceEstimateSelectedRequestId);
+    const estimate = latestServiceEstimateForRequest(request);
+    if (estimate) {
+      const sequence = serviceEstimateLinesFor(estimate).length + 1;
+      state.serviceEstimateLines.push({ id: serviceEstimateLineKey(), service_estimate_id: estimate.id, sequence, line_type: "Part", code: "", description: "New estimate line", quantity: 1, uom: "EA", unit_cost: 0, unit_price: 0, reference_unit_cost: 0, reference_unit_price: 0, source_type: "Manual", source_reference: "Qualified estimator entry", confidence: "Low", override_reason: "", is_optional: false });
+      renderServiceEstimatingWorkspace();
+    }
+    return;
+  }
+  const estimateLineRemove = event.target.closest("[data-service-estimate-line-remove]");
+  if (estimateLineRemove) {
+    state.serviceEstimateLines = state.serviceEstimateLines.filter((line) => line.id !== estimateLineRemove.dataset.serviceEstimateLineRemove);
+    renderServiceEstimatingWorkspace();
+    return;
+  }
+  if (event.target.closest("[data-service-estimate-save]")) { saveServiceEstimateFromMatrix(false); return; }
+  if (event.target.closest("[data-service-estimate-submit]")) { saveServiceEstimateFromMatrix(true); return; }
+  const estimateReview = event.target.closest("[data-service-estimate-review]");
+  if (estimateReview) {
+    const request = state.serviceRequests.find((entry) => entry.id === estimateReview.dataset.serviceRequestId);
+    const estimate = latestServiceEstimateForRequest(request);
+    const note = estimateReview.closest("[data-service-request-card]")?.querySelector(`[data-service-estimate-review-note="${CSS.escape(request?.id || "")}"]`)?.value || "";
+    if (request && estimate) reviewServiceEstimate(request, estimate, estimateReview.dataset.serviceEstimateReview, note);
+    return;
+  }
+  const serviceCostAdd = event.target.closest("[data-service-cost-add]");
+  if (serviceCostAdd) { recordServiceActualCost(serviceCostAdd.dataset.serviceCostAdd, serviceCostAdd.closest("[data-operations-job-card]")); return; }
   if (event.target.closest("[data-service-new]")) { state.serviceRequestEditorOpen = true; state.serviceRequestFormError = ""; renderServiceRequestsWorkspace(); $("#serviceRequestForm select[name='sourceChannel']")?.focus(); return; }
   if (event.target.closest("[data-service-editor-close]")) { state.serviceRequestEditorOpen = false; state.serviceRequestFormError = ""; renderServiceRequestsWorkspace(); return; }
   if (event.target.closest("[data-service-open-requests]")) { openWorkspace("serviceRequests"); return; }

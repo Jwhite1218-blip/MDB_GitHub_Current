@@ -13,7 +13,18 @@ const {
   operationsJobTransitionTarget,
   serviceRequestTransitionTarget,
   validScheduleWindow,
+  serviceEstimatorRoles,
 } = require("../netlify/functions/_operations-job");
+
+test("service estimator is a distinct qualified role, not a gatekeeper shortcut", () => {
+  assert.equal(ROLES.SERVICE_ESTIMATOR, "service_estimator");
+  assert.equal(serviceEstimatorRoles.includes(ROLES.SERVICE_ESTIMATOR), true);
+  assert.equal(canTransitionServiceRequest({
+    status: SERVICE_REQUEST_STATUSES.SUBMITTED,
+    action: "triage",
+    roles: [ROLES.SERVICE_ESTIMATOR],
+  }), false);
+});
 
 test("authorized employees can submit service demand without accepting their own request", () => {
   assert.equal(canCreateServiceRequest([ROLES.SALES]), true);

@@ -14,8 +14,23 @@ test("service intake and the shared operations board are first-class workspaces"
   assert.match(index, /data-open="serviceRequests"/);
   assert.match(index, /data-open="operationsBoard"/);
   assert.match(index, /Operations &amp; Service/);
+  assert.match(index, /data-open="serviceEstimating"/);
   assert.match(app, /renderServiceRequestsWorkspace/);
   assert.match(app, /renderOperationsBoardWorkspace/);
+});
+
+test("qualified service estimating exposes an explainable scan-and-edit matrix", () => {
+  assert.match(app, /function renderServiceEstimatingWorkspace/);
+  assert.match(app, /Only assigned Service Estimators build or change service quotes/);
+  assert.match(app, /Cost and quote matrix/);
+  assert.match(app, /Reference cost and sell rate stay visible; every override requires a reason/);
+  assert.match(app, /Submit to Gatekeeper/);
+  assert.match(app, /Approve Estimate &amp; Triage/);
+  assert.match(app, /Estimate-to-actual cost/);
+  assert.match(app, /Actual service cost added to the estimate-learning record/);
+  assert.match(styles, /\.service-estimating-layout/);
+  assert.match(styles, /\.service-estimate-summary/);
+  assert.match(styles, /\.service-cost-tracking/);
 });
 
 test("request, shared job, and specialized work order stay visibly separate", () => {

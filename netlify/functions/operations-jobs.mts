@@ -12,6 +12,7 @@ type OperationalActor = Awaited<ReturnType<typeof requireOperationalActor>>;
 type Row = Record<string, unknown>;
 
 const SERVICE_CONTROLLER_ROLES = ["service_controller", "production_controller", "admin"];
+const SERVICE_ESTIMATOR_ROLES = ["service_estimator", "admin"];
 const OPERATIONS_CONTROLLER_ROLES = [
   "service_controller", "production_controller", "inventory_controller", "admin",
 ];
@@ -78,7 +79,8 @@ function hasAnyRole(actor: OperationalActor, roles: string[]) {
 
 async function listOperations(actor: OperationalActor) {
   const [serviceRequests, requestEvents, serviceWorkOrders, jobs, assignments,
-    jobEvents, checkpoints, checkpointDefinitions, tasks, signoffs, scopeItems, workCenters, buildOrders, operationalUsers] = await Promise.all([
+    jobEvents, checkpoints, checkpointDefinitions, tasks, signoffs, scopeItems, workCenters, buildOrders, operationalUsers,
+    serviceEstimates, serviceEstimateLines, serviceEstimateEvents, servicePricingRules, serviceActualCosts] = await Promise.all([
     readRows("service_requests?select=*&order=created_at.desc&limit=500", "Service Request queue"),
     readRows("service_request_events?select=*&order=created_at.desc&limit=2000", "Service Request history"),
     readRows("service_work_orders?select=*&order=created_at.desc&limit=500", "Service Work Orders"),
@@ -93,9 +95,15 @@ async function listOperations(actor: OperationalActor) {
     readRows("work_centers?select=*&is_active=eq.true&order=center_type,code", "Work centers"),
     readRows("build_orders?select=*&operations_job_id=not.is.null&order=created_at.desc&limit=1000", "Build Orders"),
     readRows("operational_users?select=id,display_name,initials,operational_user_roles(role)&is_active=eq.true&order=display_name", "Operational employees"),
+    readRows("service_estimates?select=*&order=updated_at.desc&limit=1000", "Service Estimates"),
+    readRows("service_estimate_lines?select=*&order=service_estimate_id,sequence&limit=10000", "Service Estimate lines"),
+    readRows("service_estimate_events?select=*&order=created_at.desc&limit=4000", "Service Estimate history"),
+    readRows("service_pricing_rules?select=*&is_active=eq.true&order=profile_version.desc,service_family,line_type,rule_code&limit=2000", "Service pricing rules"),
+    readRows("service_actual_cost_entries?select=*&order=occurred_on.desc,id.desc&limit=10000", "Service actual costs"),
   ]);
 
-  const seesAllRequests = hasAnyRole(actor, SERVICE_CONTROLLER_ROLES);
+  const seesPricing = hasAnyRole(actor, [...SERVICE_CONTROLLER_ROLES, ...SERVICE_ESTIMATOR_ROLES]);
+  const seesAllRequests = seesPricing;
   const seesAllJobs = hasAnyRole(actor, OPERATIONS_CONTROLLER_ROLES);
   const assignedJobIds = new Set(jobs
     .filter((job) => job.assignee_user_id === actor.id || job.created_by_user_id === actor.id)
@@ -121,6 +129,9 @@ async function listOperations(actor: OperationalActor) {
     visibleRequestIds.has(String(workOrder.service_request_id))
     && visibleJobIds.has(String(workOrder.operations_job_id)));
   const visibleWorkOrderIds = new Set(visibleWorkOrders.map((workOrder) => String(workOrder.id)));
+  const visibleEstimates = serviceEstimates.filter((estimate) =>
+    visibleRequestIds.has(String(estimate.service_request_id)));
+  const visibleEstimateIds = new Set(visibleEstimates.map((estimate) => String(estimate.id)));
 
   return jsonResponse(200, {
     ok: true,
@@ -139,9 +150,14 @@ async function listOperations(actor: OperationalActor) {
       || visibleWorkOrderIds.has(String(task.service_work_order_id))),
     serviceSignoffs: signoffs.filter((signoff) => visibleWorkOrderIds.has(String(signoff.service_work_order_id))),
     serviceScopeItems: scopeItems.filter((item) => visibleWorkOrderIds.has(String(item.service_work_order_id))),
+    serviceEstimates: visibleEstimates,
+    serviceEstimateLines: serviceEstimateLines.filter((line) => visibleEstimateIds.has(String(line.service_estimate_id))),
+    serviceEstimateEvents: serviceEstimateEvents.filter((event) => visibleEstimateIds.has(String(event.service_estimate_id))),
+    servicePricingRules: seesPricing ? servicePricingRules : [],
+    serviceActualCosts: serviceActualCosts.filter((entry) => visibleWorkOrderIds.has(String(entry.service_work_order_id))),
     workCenters,
     buildOrders: buildOrders.filter((build) => visibleJobIds.has(String(build.operations_job_id))),
-    operationalUsers: (seesAllRequests || seesAllJobs)
+    operationalUsers: (seesAllRequests || seesAllJobs || seesPricing)
       ? operationalUsers
       : operationalUsers.filter((user) => user.id === actor.id),
   });
@@ -189,6 +205,55 @@ async function handleOperation(request: Request, actor: OperationalActor) {
       p_assignee_user_id: optionalText(body.assigneeUserId, 80),
     });
     return jsonResponse(200, { ok: true, result });
+  }
+
+  if (operation === "save_service_estimate") {
+    const lines = body.lines;
+    if (!Array.isArray(lines) || lines.length < 1 || lines.length > 100) {
+      throw new OperationalApiError(400, "lines must contain between 1 and 100 estimate lines.");
+    }
+    const result = await callOperationalRpc("mdb_save_service_estimate_v1", {
+      p_actor_user_id: actor.id,
+      p_service_request_id: requiredText(body.serviceRequestId, "serviceRequestId", 200),
+      p_estimate_id: optionalText(body.estimateId, 200),
+      p_diagnostic_family: requiredText(body.diagnosticFamily, "diagnosticFamily", 300),
+      p_customer_scope: requiredText(body.customerScope, "customerScope", 8000),
+      p_assumptions: optionalText(body.assumptions, 8000) || "",
+      p_exclusions: optionalText(body.exclusions, 8000) || "",
+      p_internal_note: optionalText(body.internalNote, 8000) || "",
+      p_pricing_profile_version: optionalInteger(body.pricingProfileVersion, "pricingProfileVersion", 1, 100000),
+      p_recommendation_basis: optionalText(body.recommendationBasis, 8000) || "",
+      p_recommendation_confidence: allowedValue(body.recommendationConfidence, "recommendationConfidence", ["Low", "Medium", "High"], "Low"),
+      p_lines: lines,
+    });
+    return jsonResponse(200, { ok: true, result });
+  }
+
+  if (operation === "transition_service_estimate") {
+    const result = await callOperationalRpc("mdb_transition_service_estimate_v1", {
+      p_actor_user_id: actor.id,
+      p_service_estimate_id: requiredText(body.serviceEstimateId, "serviceEstimateId", 200),
+      p_action: allowedValue(body.action, "action", ["submit", "return", "approve"]),
+      p_note: optionalText(body.note, 8000) || "",
+    });
+    return jsonResponse(200, { ok: true, result });
+  }
+
+  if (operation === "record_service_actual_cost") {
+    const result = await callOperationalRpc("mdb_record_service_actual_cost_v1", {
+      p_actor_user_id: actor.id,
+      p_service_work_order_id: requiredText(body.serviceWorkOrderId, "serviceWorkOrderId", 200),
+      p_line_type: allowedValue(body.lineType, "lineType", ["Labor", "Part", "Travel", "Outside", "Shop Supply", "Contingency"]),
+      p_description: requiredText(body.description, "description", 2000),
+      p_quantity: optionalNumber(body.quantity, "quantity", 0.0001) || 1,
+      p_uom: optionalText(body.uom, 40) || "EA",
+      p_unit_cost: optionalNumber(body.unitCost, "unitCost", 0) || 0,
+      p_source_type: allowedValue(body.sourceType, "sourceType", ["GP", "Time Entry", "Inventory", "Outside Invoice", "Manual"], "Manual"),
+      p_source_reference: optionalText(body.sourceReference, 1000) || "",
+      p_occurred_on: optionalText(body.occurredOn, 20),
+      p_service_estimate_line_id: optionalText(body.serviceEstimateLineId, 200),
+    });
+    return jsonResponse(201, { ok: true, result });
   }
 
   if (operation === "schedule_job") {

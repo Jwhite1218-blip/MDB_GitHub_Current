@@ -8,12 +8,14 @@ document.
 ```text
 Sales Order line -> Build Request -----> Build Order ---------+
                                                                |
-Service need ----> Service Request ----> Service Work Order ---+--> Operations Job
-                                                                    | schedule/capacity
-                                                                    | assignee/tasks
-                                                                    | checkpoints/evidence
-                                                                    | events/exceptions
-                                                                    + closeout visibility
+Service need ----> Service Request ----> Service Estimate ----> Gatekeeper
+                                           |                       |
+                                           +-----------------------+----> Service Work Order ---+--> Operations Job
+                                                                                                    | schedule/capacity
+                                                                                                    | assignee/tasks
+                                                                                                    | checkpoints/evidence
+                                                                                                    | events/exceptions
+                                                                                                    + closeout visibility
 ```
 
 The **request** records who needs what and why. The specialized **Build Order**
@@ -55,6 +57,21 @@ migration, API, or public demo.
 A requester cannot accept their own request merely because they created it.
 Request status is kept separate from the downstream job so the requester can see
 a stable lifecycle without editing controlled work.
+
+### Qualified commercial interpretation
+
+- `service_estimates`: revisioned, qualified scope, assumptions, exclusions,
+  recommendation basis, confidence, estimated cost, quote price, and margin.
+- `service_estimate_lines`: labor, part, travel, outside-service, supply, and
+  contingency detail with reference values, source evidence, and mandatory
+  override rationale.
+- `service_pricing_rules`: versioned cost and sell-rate structure.
+- `service_actual_cost_entries`: append-only Service Work Order costs used for
+  estimate-versus-actual feedback.
+
+Only the `service_estimator` role builds and submits the commercial package.
+The gatekeeper approves or returns it without rewriting the estimator's locked
+revision. See `SERVICE_ESTIMATING_AND_COST_FOUNDATION.md`.
 
 ### Specialized execution
 

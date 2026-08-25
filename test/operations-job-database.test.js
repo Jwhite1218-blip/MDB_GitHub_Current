@@ -25,12 +25,19 @@ const shopCentersMigrationPath = path.join(
   "migrations",
   "20260825103000_operations_shop_work_centers.sql",
 );
+const serviceEstimateMigrationPath = path.join(
+  root,
+  "supabase",
+  "migrations",
+  "20260825143000_service_estimate_matrix.sql",
+);
 
 const SALES = "11111111-1111-4111-8111-111111111111";
 const PRODUCTION_CONTROLLER = "22222222-2222-4222-8222-222222222222";
 const SERVICE_CONTROLLER = "33333333-3333-4333-8333-333333333333";
 const SERVICE_TECH = "44444444-4444-4444-8444-444444444444";
 const OTHER_TECH = "55555555-5555-4555-8555-555555555555";
+const SERVICE_ESTIMATOR = "66666666-6666-4666-8666-666666666666";
 
 async function first(db, sql, parameters = []) {
   const result = await db.query(sql, parameters);
@@ -53,8 +60,125 @@ async function bootstrapDatabase() {
   await db.exec(productionMigration);
   await db.exec(await readFile(operationsMigrationPath, "utf8"));
   await db.exec(await readFile(shopCentersMigrationPath, "utf8"));
+  await db.exec(await readFile(serviceEstimateMigrationPath, "utf8"));
   return db;
 }
+
+test("qualified Service Estimator submits a priced package before Gatekeeper approval", async (t) => {
+  const db = await bootstrapDatabase();
+  t.after(() => db.close());
+
+  await db.exec(`
+    insert into public.operational_users (id, identity_subject, email, display_name, initials)
+    values
+      ('${SALES}', 'estimate-sales', 'estimate-sales@example.test', 'Service Requester', 'SR'),
+      ('${SERVICE_ESTIMATOR}', 'estimate-qualified', 'estimator@example.test', 'Qualified Estimator', 'QE'),
+      ('${SERVICE_CONTROLLER}', 'estimate-gatekeeper', 'gatekeeper@example.test', 'Service Gatekeeper', 'SG'),
+      ('${SERVICE_TECH}', 'estimate-tech', 'estimate-tech@example.test', 'Service Technician', 'ST');
+    insert into public.operational_user_roles (user_id, role)
+    values
+      ('${SALES}', 'sales'),
+      ('${SERVICE_ESTIMATOR}', 'service_estimator'),
+      ('${SERVICE_CONTROLLER}', 'service_controller'),
+      ('${SERVICE_TECH}', 'service_technician');
+  `);
+
+  await db.query(
+    `select public.mdb_create_service_request_v1(
+       $1::uuid, 'Email', 'Priority', 'Customer', 'MDB shop', 'Fleet manager',
+       'ASSET-EST', 'SERIAL-EST', 'B57', 2200, 'Rotary head stops under load',
+       'Diagnose and quote repair', 'Unknown', 'In House', true, 'service-estimate-request'
+     )`,
+    [SALES],
+  );
+
+  const lines = JSON.stringify([
+    {
+      id: "estimate-line-diagnostic", lineType: "Labor", code: "LAB-DIAG",
+      description: "Rotary head diagnosis", quantity: 3, uom: "HR",
+      unitCost: 48, unitPrice: 135, referenceUnitCost: 48, referenceUnitPrice: 135,
+      sourceType: "Rate Card", sourceReference: "Service profile v1", confidence: "Low",
+      overrideReason: "", isOptional: false,
+    },
+    {
+      id: "estimate-line-repair", lineType: "Labor", code: "LAB-REPAIR",
+      description: "Repair allowance", quantity: 8, uom: "HR",
+      unitCost: 48, unitPrice: 125, referenceUnitCost: 48, referenceUnitPrice: 125,
+      sourceType: "Rate Card", sourceReference: "Service profile v1", confidence: "Low",
+      overrideReason: "", isOptional: false,
+    },
+  ]);
+
+  await assert.rejects(
+    db.query(
+      `select public.mdb_save_service_estimate_v1(
+         $1::uuid, 'service-estimate-request', 'estimate-controlled', 'Rotary Head / Drive',
+         'Diagnose, repair, and test', 'Based on supplied complaint', 'Parts excluded', '',
+         1, 'Intake pattern plus profile v1', 'Low', $2::jsonb
+       )`,
+      [SALES, lines],
+    ),
+    /Only a qualified Service Estimator/,
+  );
+
+  const saved = await first(
+    db,
+    `select public.mdb_save_service_estimate_v1(
+       $1::uuid, 'service-estimate-request', 'estimate-controlled', 'Rotary Head / Drive',
+       'Diagnose, repair, and test', 'Based on supplied complaint', 'Parts excluded', '',
+       1, 'Intake pattern plus profile v1', 'Low', $2::jsonb
+     ) as result`,
+    [SERVICE_ESTIMATOR, lines],
+  );
+  assert.equal(saved.result.estimate.status, "Draft");
+  assert.equal(Number(saved.result.estimate.total_cost), 528);
+  assert.equal(Number(saved.result.estimate.quoted_price), 1405);
+
+  await db.query(
+    "select public.mdb_transition_service_estimate_v1($1::uuid, 'estimate-controlled', 'submit', 'Qualified scan complete')",
+    [SERVICE_ESTIMATOR],
+  );
+  await assert.rejects(
+    db.query(
+      "select public.mdb_transition_service_estimate_v1($1::uuid, 'estimate-controlled', 'approve')",
+      [SERVICE_ESTIMATOR],
+    ),
+    /Only a Service Gatekeeper/,
+  );
+  const approved = await first(
+    db,
+    "select public.mdb_transition_service_estimate_v1($1::uuid, 'estimate-controlled', 'approve', 'Commercial package approved') as result",
+    [SERVICE_CONTROLLER],
+  );
+  assert.equal(approved.result.estimate.status, "Approved");
+  assert.equal(approved.result.serviceRequest.status, "Triaged");
+  assert.equal(approved.result.serviceRequest.financial_class, "Billable");
+
+  await db.query(
+    "select public.mdb_transition_service_request_v1($1::uuid, 'service-estimate-request', 'accept', 'Schedule approved work')",
+    [SERVICE_CONTROLLER],
+  );
+  const converted = await first(
+    db,
+    `select public.mdb_transition_service_request_v1(
+       $1::uuid, 'service-estimate-request', 'convert', 'Create controlled execution',
+       null, null, 2::smallint, $1::uuid, $2::uuid
+     ) as result`,
+    [SERVICE_CONTROLLER, SERVICE_TECH],
+  );
+  await db.query(
+    `select public.mdb_record_service_actual_cost_v1(
+       $1::uuid, $2, 'Labor', 'Technician time', 7.5, 'HR', 48,
+       'Time Entry', 'TIME-001', '2026-08-25', 'estimate-line-repair'
+     )`,
+    [SERVICE_TECH, converted.result.serviceWorkOrderId],
+  );
+  const actual = await first(
+    db,
+    "select count(*)::int as entries, sum(extended_cost)::numeric as total from public.service_actual_cost_entries",
+  );
+  assert.deepEqual(actual, { entries: 1, total: "360.00" });
+});
 
 async function createConvertedService(db, requestId, assetId) {
   const created = await first(
