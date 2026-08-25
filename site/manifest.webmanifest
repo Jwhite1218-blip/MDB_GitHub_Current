@@ -6,6 +6,11 @@
   "start_url": "/?source=installed",
   "scope": "/",
   "display": "standalone",
+  "display_override": [
+    "window-controls-overlay",
+    "standalone",
+    "minimal-ui"
+  ],
   "orientation": "any",
   "background_color": "#071827",
   "theme_color": "#0b2239",
