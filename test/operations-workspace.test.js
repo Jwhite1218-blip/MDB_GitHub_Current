@@ -27,14 +27,25 @@ test("request, shared job, and specialized work order stay visibly separate", ()
 });
 
 test("gatekeeper and technician surfaces expose different actions", () => {
-  assert.match(app, /Every build and service commitment passes through the gatekeeper/);
-  assert.match(app, /Technicians execute assigned work and document checkpoint evidence/);
+  assert.match(app, /Every tooling, rig-part, build, and service commitment passes through the gatekeeper/);
+  assert.match(app, /Technicians and shop employees execute assigned work and document evidence/);
   assert.match(app, /data-job-action="release"/);
   assert.match(app, /data-job-action="start"/);
   assert.match(app, /data-checkpoint-complete/);
   assert.match(app, /data-job-signoff/);
   assert.match(app, /Resubmit to Gatekeeper/);
   assert.match(app, /Cancel Request/);
+});
+
+test("gatekeeper routes tooling and rig-part work through controlled shop centers", () => {
+  assert.match(app, /Tooling &amp; Rig-Part Build Requests/);
+  assert.match(app, /Machine Shop/);
+  assert.match(app, /Preassembly Work Bay/);
+  assert.match(app, /function operationsWorkCentersForJob/);
+  assert.match(app, /function syncDemoBuildOperationsJobs/);
+  assert.match(app, /Gatekeeper routing/);
+  assert.match(app, /data-operations-build-open/);
+  assert.match(app, /\["Planning", "Order Setup Pending", "Scheduled"\]/);
 });
 
 test("service intake keeps future Mobile Lite and NFC channels without building a mobile ERP", () => {
@@ -46,5 +57,6 @@ test("operations workspaces have responsive desktop and lite-frame layouts", () 
   assert.match(styles, /\.operations-inbox-columns/);
   assert.match(styles, /\.operations-job-card/);
   assert.match(styles, /\.checkpoint-list/);
+  assert.match(styles, /\.operations-routing-history/);
   assert.match(styles, /@media \(max-width: 700px\)/);
 });

@@ -127,9 +127,14 @@ completed with an empty evidence note.
 
 The Operations Board is the cross-functional control surface:
 
-- Sales Build Requests and Service Requests arrive in one decision inbox.
+- Tooling and rig-part Build Requests plus Service Requests arrive in one
+  decision inbox. The originating Sales Order line remains the demand source
+  for build requests.
 - Acceptance creates the appropriate specialized document, not a generic order.
-- Work-center capacity is committed before release.
+- The gatekeeper routes accepted tooling and rig-part work to the Machine Shop,
+  Preassembly Work Bay, or another controlled center before release.
+- Work-center capacity is committed before release. A reroute creates a new
+  assignment revision and preserves the prior gatekeeper decision as history.
 - Priority, assignment, schedule, exceptions, and readiness remain visible in
   one queue.
 - Requesters and sales representatives see derived lifecycle stages without
@@ -148,6 +153,12 @@ their slot capacity. Active assignments are revisioned rather than overwritten.
 A database trigger rejects overlapping use of the same work-center slot. This
 prevents two browser sessions from making the same bay commitment even if both
 loaded an older screen.
+
+`Machine Shop` and `Preassembly Work Bay` are seeded as controlled routing
+destinations with one placeholder slot each. Those capacities are deliberately
+conservative until the gatekeeper validates actual concurrency. Routing and
+capacity stay on the shared Operations Job; BOM preparation, release,
+consumption, output, and completion remain on the linked Build Order.
 
 ## GP boundary
 

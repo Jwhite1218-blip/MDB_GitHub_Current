@@ -19,6 +19,12 @@ const operationsMigrationPath = path.join(
   "migrations",
   "20260825090000_operations_job_service_foundation.sql",
 );
+const shopCentersMigrationPath = path.join(
+  root,
+  "supabase",
+  "migrations",
+  "20260825103000_operations_shop_work_centers.sql",
+);
 
 const SALES = "11111111-1111-4111-8111-111111111111";
 const PRODUCTION_CONTROLLER = "22222222-2222-4222-8222-222222222222";
@@ -46,6 +52,7 @@ async function bootstrapDatabase() {
   );
   await db.exec(productionMigration);
   await db.exec(await readFile(operationsMigrationPath, "utf8"));
+  await db.exec(await readFile(shopCentersMigrationPath, "utf8"));
   return db;
 }
 
@@ -346,6 +353,12 @@ test("existing Build Orders receive a shared Operations Job without losing produ
   t.after(() => db.close());
 
   await db.exec(`
+    insert into public.operational_users (id, identity_subject, email, display_name, initials)
+    values ('${PRODUCTION_CONTROLLER}', 'identity-production-routing', 'routing@example.test', 'Production Controller', 'PC');
+
+    insert into public.operational_user_roles (user_id, role)
+    values ('${PRODUCTION_CONTROLLER}', 'production_controller');
+
     insert into public.items (part_number, description, item_class, uom)
     values ('RIG-BUILD-001', 'Rig build test', 'Assembly', 'EA');
 
@@ -376,6 +389,54 @@ test("existing Build Orders receive a shared Operations Job without losing produ
   assert.equal(linked.job_type, "rig_build");
   assert.equal(linked.status, "Planning");
   assert.equal(linked.title, "Controlled rig build");
+
+  await db.query(
+    `select public.mdb_schedule_operations_job_v1(
+       $1::uuid, $2, 'machine-shop', 1::smallint,
+       '2026-09-08T08:00:00Z'::timestamptz, '2026-09-08T12:00:00Z'::timestamptz,
+       'Gatekeeper routed rig-part work to the Machine Shop'
+     )`,
+    [PRODUCTION_CONTROLLER, linked.operations_job_id],
+  );
+  const routed = await first(
+    db,
+    `select j.status, j.work_center_id, c.name as work_center,
+            a.revision, a.reason
+       from public.operations_jobs j
+       join public.work_centers c on c.id = j.work_center_id
+       join public.operations_job_assignments a on a.job_id = j.id and a.superseded_at is null
+      where j.id = $1`,
+    [linked.operations_job_id],
+  );
+  assert.equal(routed.status, "Scheduled");
+  assert.equal(routed.work_center_id, "machine-shop");
+  assert.equal(routed.work_center, "Machine Shop");
+  assert.equal(routed.revision, 1);
+  assert.match(routed.reason, /Gatekeeper routed/);
+
+  await db.query(
+    `select public.mdb_schedule_operations_job_v1(
+       $1::uuid, $2, 'preassembly-work-bay', 1::smallint,
+       '2026-09-08T13:00:00Z'::timestamptz, '2026-09-08T17:00:00Z'::timestamptz,
+       'Gatekeeper handed completed machine work to Preassembly'
+     )`,
+    [PRODUCTION_CONTROLLER, linked.operations_job_id],
+  );
+  const handedOff = await first(
+    db,
+    `select j.work_center_id, c.name as work_center, a.revision,
+            (select count(*)::int from public.operations_job_assignments
+              where job_id = j.id and superseded_at is not null) as prior_routes
+       from public.operations_jobs j
+       join public.work_centers c on c.id = j.work_center_id
+       join public.operations_job_assignments a on a.job_id = j.id and a.superseded_at is null
+      where j.id = $1`,
+    [linked.operations_job_id],
+  );
+  assert.equal(handedOff.work_center_id, "preassembly-work-bay");
+  assert.equal(handedOff.work_center, "Preassembly Work Bay");
+  assert.equal(handedOff.revision, 2);
+  assert.equal(handedOff.prior_routes, 1);
 });
 
 test("operations and service tables remain server-only with append-only evidence", async (t) => {

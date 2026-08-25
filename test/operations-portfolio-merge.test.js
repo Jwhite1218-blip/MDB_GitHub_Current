@@ -29,7 +29,7 @@ test("sales demand stays linked to an exact Sales Order line", () => {
 test("gatekeeper owns acceptance, assignment, and shop release", () => {
   assert.match(app, /function canControlBuild\(\)/);
   assert.match(app, /Only Production Control can release work to the shop/);
-  assert.match(app, /Commit a completion date and shop assignment before accepting/);
+  assert.match(app, /Commit a completion date and initial work-center route before accepting/);
   assert.match(app, /data-request-accept/);
   assert.match(app, /data-request-return/);
 });

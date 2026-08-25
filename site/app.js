@@ -14,7 +14,9 @@ const productionDemoActors = {
   service_controller: { role: "service_controller", initials: "SC", name: "Service Controller", label: "Service Control" },
   service_technician: { role: "service_technician", initials: "TECH", name: "Service Technician", label: "Service Execution" },
 };
-const productionShopAssignments = ["Fabrication Cell A", "Assembly Cell B", "Weld Cell"];
+const productionShopAssignments = [
+  "Machine Shop", "Preassembly Work Bay", "Fabrication Cell A", "Assembly Cell B", "Weld Cell",
+];
 const feedbackAccessKey = "mdb-feedback-access-v1";
 const feedbackAccessDuration = 14 * 24 * 60 * 60 * 1000;
 const feedbackPinHash = "7328f9713cf2421aed7685680e2b799ea64dedf2e76f82f1017d8bc8f80a992f";
@@ -731,18 +733,43 @@ function operationsDemoTimestamp(daysFromNow = 0, hour = 12) {
   return date.toISOString();
 }
 
-function ensureOperationsDemo() {
-  if (!isPublicDemo || state.serviceRequests.length || state.operationsJobs.length) return;
-  state.workCenters = [
+function ensureDemoOperationsResources() {
+  const requiredCenters = [
     { id: "service-bay-1", code: "SB-01", name: "Service Bay 1", center_type: "service_bay", capacity: 1 },
     { id: "service-bay-2", code: "SB-02", name: "Service Bay 2", center_type: "service_bay", capacity: 1 },
     { id: "field-service-1", code: "FIELD", name: "Field Service", center_type: "field", capacity: 3 },
+    { id: "machine-shop", code: "MACHINE", name: "Machine Shop", center_type: "shop_cell", capacity: 1 },
+    { id: "preassembly-work-bay", code: "PREASM", name: "Preassembly Work Bay", center_type: "build_bay", capacity: 1 },
+    { id: "fabrication-cell-a", code: "FAB-A", name: "Fabrication Cell A", center_type: "shop_cell", capacity: 1 },
     { id: "assembly-cell-b", code: "ASM-B", name: "Assembly Cell B", center_type: "build_bay", capacity: 1 },
+    { id: "weld-cell", code: "WELD", name: "Weld Cell", center_type: "shop_cell", capacity: 1 },
   ];
-  state.operationalUsers = [
+  requiredCenters.forEach((center) => {
+    const existing = state.workCenters.find((entry) => entry.id === center.id);
+    if (existing) Object.assign(existing, center);
+    else state.workCenters.push(center);
+  });
+
+  const requiredUsers = [
     { id: "demo-service-controller", display_name: "Service Controller", initials: "SC", operational_user_roles: [{ role: "service_controller" }] },
+    { id: "demo-production-controller", display_name: "Production Controller", initials: "PC", operational_user_roles: [{ role: "production_controller" }] },
     { id: "demo-service-technician", display_name: "Service Technician", initials: "TECH", operational_user_roles: [{ role: "service_technician" }] },
+    { id: "demo-shop-employee", display_name: "Assigned Shop Employee", initials: "SHOP", operational_user_roles: [{ role: "shop" }] },
   ];
+  requiredUsers.forEach((user) => {
+    const existing = state.operationalUsers.find((entry) => entry.id === user.id);
+    if (existing) Object.assign(existing, user);
+    else state.operationalUsers.push(user);
+  });
+}
+
+function ensureOperationsDemo() {
+  if (!isPublicDemo) return;
+  ensureDemoOperationsResources();
+  if (state.serviceRequests.length || state.operationsJobs.length) {
+    saveOperationsSnapshot();
+    return;
+  }
   state.serviceRequests = [
     {
       id: "demo-service-request-machine-down", request_number: "SRQ001001", source_channel: "Mobile",
@@ -1207,7 +1234,8 @@ function newBuild(overrides = {}) {
     quantity: 1, builtQty: 0, dueDate: "", locationCode: "MAIN",
     status: "Open", notes: "",
     releasedAt: null, releasedByInitials: "", releasedByName: "", finishedAt: null,
-    buildRequestId: null, controllerName: "", shopAssigneeName: "",
+    buildRequestId: null, operationsJobId: null, workType: "component_build",
+    controllerName: "", shopAssigneeName: "",
     priority: 3, requestedDueDate: "", committedDueDate: "",
     exceptionCode: null, exceptionDetail: "", revision: 1,
     components: [], events: [],
@@ -1240,6 +1268,8 @@ function normalizeBuild(build) {
   build.releasedByName ||= "";
   build.finishedAt ||= null;
   build.buildRequestId ||= null;
+  build.operationsJobId ||= null;
+  build.workType ||= "component_build";
   build.controllerName ||= "";
   build.shopAssigneeName ||= "";
   build.priority = Math.min(5, Math.max(1, Number(build.priority) || 3));
@@ -1385,6 +1415,93 @@ function nextBuildRequestNumber() {
 
 function buildForRequest(request) {
   return state.builds.find((build) => build.id === request.buildOrderId || build.buildRequestId === request.id) || null;
+}
+
+function operationsItemType(part, jobType = "component_build") {
+  if (jobType === "service_job") return "Service / Rig";
+  if (jobType === "rig_build") return "Rig Build";
+  const itemClass = state.itemsByPart.get(canonicalPartNumber(part))?.itemClass || "";
+  if (itemClass.includes("Tooling") && itemClass.includes("Rig Part")) return "Tooling / Rig Part";
+  if (itemClass.includes("Tooling")) return "Tooling";
+  if (itemClass.includes("Rig Part")) return "Rig Part";
+  return "Rig Part / Component";
+}
+
+function demoOperationsStatusForBuild(build) {
+  if (build.status === "Finished") return "Closed";
+  if (build.status === "Cancelled") return "Cancelled";
+  if (build.status === "Released" && (Number(build.builtQty) > 0 || build.actualStartedAt)) return "In Progress";
+  if (build.status === "Released") return "Released";
+  return "Scheduled";
+}
+
+function demoWorkCenterForBuild(build) {
+  const named = state.workCenters.find((center) => center.name === build.shopAssigneeName);
+  if (named) return named;
+  const workItemType = operationsItemType(build.part, build.workType);
+  return state.workCenters.find((center) => center.id === (workItemType.includes("Tooling") ? "machine-shop" : "preassembly-work-bay")) || null;
+}
+
+function ensureDemoBuildOperationsJob(build) {
+  if (!isPublicDemo || !build) return null;
+  ensureDemoOperationsResources();
+  const request = state.buildRequests.find((entry) => entry.id === build.buildRequestId);
+  const jobId = build.operationsJobId || `opj-build-${build.id}`;
+  const center = demoWorkCenterForBuild(build);
+  let job = state.operationsJobs.find((entry) => entry.id === jobId);
+  const values = {
+    id: jobId,
+    job_number: job?.job_number || `OPJ-B-${build.buildNumber || build.id}`,
+    job_type: build.workType || "component_build",
+    subject_type: operationsItemType(build.part, build.workType),
+    status: demoOperationsStatusForBuild(build),
+    title: `${build.part || "Build item"} · ${build.description || "Controlled shop work"}`,
+    controller_user_id: "demo-production-controller",
+    assignee_user_id: "demo-shop-employee",
+    assignee_name: "Assigned Shop Employee",
+    priority: build.priority || 3,
+    work_center_id: center?.id || null,
+    planned_start_at: build.createdAt || new Date().toISOString(),
+    committed_due_at: build.committedDueDate ? new Date(`${build.committedDueDate}T16:00:00`).toISOString() : null,
+    gp_link_status: "Pending",
+    exception_code: build.exceptionCode || null,
+    exception_detail: build.exceptionDetail || "",
+    build_order_id: build.id,
+    build_request_id: request?.id || null,
+    created_at: build.createdAt || new Date().toISOString(),
+    updated_at: build.lastModifiedAt || new Date().toISOString(),
+  };
+  if (job) Object.assign(job, values);
+  else {
+    job = values;
+    state.operationsJobs.unshift(job);
+  }
+  build.operationsJobId = jobId;
+
+  if (center && !state.operationsJobAssignments.some((assignment) => assignment.job_id === jobId && !assignment.superseded_at)) {
+    const startsAt = job.planned_start_at || new Date().toISOString();
+    const endsAt = job.committed_due_at || operationsDemoTimestamp(7, 16);
+    state.operationsJobAssignments.unshift({
+      id: Date.now() + state.operationsJobAssignments.length,
+      job_id: jobId,
+      work_center_id: center.id,
+      slot_number: 1,
+      starts_at: startsAt,
+      ends_at: endsAt,
+      revision: 1,
+      reason: `Gatekeeper routed ${job.subject_type.toLowerCase()} work to ${center.name}`,
+      created_at: job.updated_at,
+      superseded_at: null,
+    });
+  }
+  return job;
+}
+
+function syncDemoBuildOperationsJobs() {
+  if (!isPublicDemo) return;
+  state.builds.forEach(ensureDemoBuildOperationsJob);
+  saveBuilds();
+  saveOperationsSnapshot();
 }
 
 function requestStage(request) {
@@ -1627,7 +1744,7 @@ function ensureProductionControlDemo() {
 function acceptBuildRequest(request, { committedDueDate, priority, shopAssigneeName }) {
   if (request.status !== "Submitted") return;
   if (!committedDueDate || !shopAssigneeName) {
-    showToast("Commit a completion date and shop assignment before accepting");
+    showToast("Commit a completion date and initial work-center route before accepting");
     return;
   }
   const build = newBuild({
@@ -1657,9 +1774,12 @@ function acceptBuildRequest(request, { committedDueDate, priority, shopAssigneeN
   request.returnedReason = "";
   request.updatedAt = new Date().toISOString();
   recordBuildRequestEvent(request, "Accepted", "Accepted and scheduled by Production Control", `${shopAssigneeName} · due ${committedDueDate}`, "production_controller");
+  ensureDemoBuildOperationsJob(build);
   saveBuilds();
   saveBuildRequests();
-  renderProductionControlWorkspace();
+  saveOperationsSnapshot();
+  if (state.activeWorkspace === "operationsBoard") renderOperationsBoardWorkspace();
+  else renderProductionControlWorkspace();
   showToast(`${request.requestNumber} accepted and scheduled`);
 }
 
@@ -1929,6 +2049,7 @@ async function loadData() {
   loadBuildRequests();
   loadRigSalesOpportunities();
   ensureProductionControlDemo();
+  syncDemoBuildOperationsJobs();
   state.ready = true;
   buildSearchIndex();
   state.bootDurationMs = Math.round(performance.now() - startedAt);
@@ -3300,12 +3421,13 @@ function requestEventsHtml(request) {
 function buildRequestCardHtml(request, mode = "sales") {
   const stage = requestStage(request);
   const build = buildForRequest(request);
+  const workItemType = operationsItemType(request.part, build?.workType || "component_build");
   const stageClass = slugify(stage);
   const controllerActions = request.status === "Submitted" ? `<div class="gatekeeper-decision">
       <div class="gatekeeper-fields">
         <label><span>Committed completion</span><input type="date" data-request-due="${request.id}" value="${escapeHTML(request.requestedShipDate || "")}"></label>
         <label><span>Priority</span><select data-request-priority="${request.id}">${[1, 2, 3, 4, 5].map((priority) => `<option value="${priority}" ${priority === 3 ? "selected" : ""}>${priority}${priority === 1 ? " · Rush" : priority === 5 ? " · Lowest" : ""}</option>`).join("")}</select></label>
-        <label><span>Shop assignment</span><select data-request-assignee="${request.id}"><option value="">Choose a cell...</option>${productionShopAssignments.map((name) => `<option>${escapeHTML(name)}</option>`).join("")}</select></label>
+        <label><span>Initial route / work center</span><select data-request-assignee="${request.id}"><option value="">Choose a controlled work center...</option>${productionShopAssignments.map((name) => `<option>${escapeHTML(name)}</option>`).join("")}</select></label>
       </div>
       <label class="gatekeeper-note"><span>Decision note / return reason</span><input data-request-note="${request.id}" placeholder="What Sales or the shop needs to know..."></label>
       <div class="button-row"><button type="button" class="secondary-button" data-request-return="${request.id}">Return to Sales</button><button type="button" class="primary-button" data-request-accept="${request.id}">Accept &amp; Schedule</button></div>
@@ -3317,9 +3439,10 @@ function buildRequestCardHtml(request, mode = "sales") {
       ${build ? `<button type="button" class="primary-button" data-request-open-build="${request.id}" data-request-open-build-role="sales">Track Production Order</button>` : ""}
     </div>`;
   return `<article class="build-request-card" data-request-card="${request.id}">
-    <header><div><span>${escapeHTML(request.requestNumber)}</span><h3>${escapeHTML(request.part)}</h3><p>${escapeHTML(request.description || "Build requested")}</p></div><b class="request-stage is-${stageClass}">${escapeHTML(stage)}</b></header>
+    <header><div><span>${escapeHTML(request.requestNumber)} · ${escapeHTML(workItemType)}</span><h3>${escapeHTML(request.part)}</h3><p>${escapeHTML(request.description || "Build requested")}</p></div><b class="request-stage is-${stageClass}">${escapeHTML(stage)}</b></header>
     <div class="request-facts">
       <div><span>Sales Order</span><strong>${escapeHTML(requestSourceLabel(request))}</strong></div>
+      <div><span>Work item</span><strong>${escapeHTML(workItemType)}</strong></div>
       <div><span>Requested</span><strong>${request.requestedQuantity} ${escapeHTML(request.uom || "EA")}</strong></div>
       <div><span>Need date</span><strong>${escapeHTML(request.requestedShipDate || "Not specified")}</strong></div>
       <div><span>Originator</span><strong>${escapeHTML(request.originatorName)}</strong></div>
@@ -3424,6 +3547,27 @@ function operationsJobForRequest(request) {
 function serviceRequestForJob(job) {
   const workOrder = state.serviceWorkOrders.find((entry) => entry.operations_job_id === job.id);
   return workOrder ? state.serviceRequests.find((request) => request.id === workOrder.service_request_id) || null : null;
+}
+
+function operationsBuildForJob(job) {
+  return state.builds.find((build) => build.operationsJobId === job.id || job.build_order_id === build.id || job.id === `opj-build-${build.id}`) || null;
+}
+
+function operationsWorkCentersForJob(job) {
+  const allowedTypes = job.job_type === "service_job"
+    ? ["service_bay", "field", "shop_cell", "build_bay"]
+    : ["shop_cell", "build_bay"];
+  return state.workCenters.filter((center) => allowedTypes.includes(center.center_type));
+}
+
+function operationsRoutingHtml(job) {
+  const assignments = state.operationsJobAssignments.filter((assignment) => assignment.job_id === job.id)
+    .sort((a, b) => Number(b.revision || 0) - Number(a.revision || 0));
+  if (!assignments.length) return '<div class="operations-routing-history"><header><strong>Gatekeeper routing</strong><span>Not routed</span></header><p>No work-center commitment has been made.</p></div>';
+  return `<div class="operations-routing-history"><header><strong>Gatekeeper routing</strong><span>${assignments.length} decision${assignments.length === 1 ? "" : "s"}</span></header>${assignments.slice(0, 4).map((assignment) => {
+    const center = state.workCenters.find((entry) => entry.id === assignment.work_center_id);
+    return `<div class="operations-route-row ${assignment.superseded_at ? "is-superseded" : "is-current"}"><span>${assignment.superseded_at ? "↳" : "→"}</span><div><strong>${escapeHTML(center?.name || assignment.work_center_id)}</strong><small>${escapeHTML(assignment.reason || "Gatekeeper work-center commitment")} · ${operationDateTime(assignment.starts_at)} to ${operationDateTime(assignment.ends_at)}</small></div><b>${assignment.superseded_at ? "Prior" : "Current"}</b></div>`;
+  }).join("")}</div>`;
 }
 
 function operationDateTime(value) {
@@ -3668,44 +3812,49 @@ function activeAssignmentForJob(job) {
 function operationJobCardHtml(job) {
   const request = serviceRequestForJob(job);
   const workOrder = request ? serviceWorkOrderForRequest(request) : null;
+  const build = operationsBuildForJob(job);
   const assignment = activeAssignmentForJob(job);
   const checkpoints = state.operationsJobCheckpoints.filter((checkpoint) => checkpoint.job_id === job.id)
     .sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0));
   const completed = checkpoints.filter((checkpoint) => ["Complete", "Waived"].includes(checkpoint.status)).length;
-  const centers = state.workCenters.filter((center) => center.center_type === "service_bay" || center.center_type === "field");
+  const centers = operationsWorkCentersForJob(job);
   const eligibleAssignees = state.operationalUsers.filter((user) => (user.operational_user_roles || []).some((entry) => ["service_technician", "shop", "service_controller", "production_controller", "admin"].includes(entry.role)));
   const controller = state.operationsBoardRole === "service_controller";
   const technician = state.operationsBoardRole === "service_technician";
+  const workItemType = job.subject_type || operationsItemType(build?.part, job.job_type);
+  const scopeReady = !workOrder || Number(workOrder.scope_version || 0) >= 1;
   const scopeControls = controller && workOrder && Number(workOrder.scope_version || 0) < 1 ? `<div class="operations-scope-controls"><label><span>Controlled service scope</span><textarea data-job-scope="${job.id}" rows="3">${escapeHTML(request?.requested_work || request?.complaint || "")}</textarea></label><button type="button" class="primary-button" data-job-scope-save="${job.id}">Establish Version 1 Scope</button></div>` : "";
-  const scheduleControls = controller && Number(workOrder?.scope_version || 0) >= 1 && ["Planning", "Order Setup Pending"].includes(job.status) ? `<div class="operations-job-controls">
-    <label><span>Work center</span><select data-job-center="${job.id}">${centers.map((center) => `<option value="${center.id}">${escapeHTML(center.code)} · ${escapeHTML(center.name)} (${center.capacity} slot${Number(center.capacity) === 1 ? "" : "s"})</option>`).join("")}</select></label>
-    <label><span>Start</span><input type="datetime-local" data-job-start="${job.id}" value="${operationsDemoTimestamp(1, 8).slice(0, 16)}"></label>
-    <label><span>Committed due</span><input type="datetime-local" data-job-end="${job.id}" value="${operationsDemoTimestamp(2, 16).slice(0, 16)}"></label>
+  const scheduleControls = controller && scopeReady && ["Planning", "Order Setup Pending", "Scheduled"].includes(job.status) ? `<div class="operations-job-controls">
+    <label><span>Route / work center</span><select data-job-center="${job.id}">${centers.map((center) => `<option value="${center.id}" ${center.id === job.work_center_id ? "selected" : ""}>${escapeHTML(center.code)} · ${escapeHTML(center.name)} (${center.capacity} slot${Number(center.capacity) === 1 ? "" : "s"})</option>`).join("")}</select></label>
+    <label><span>Start</span><input type="datetime-local" data-job-start="${job.id}" value="${String(job.planned_start_at || operationsDemoTimestamp(1, 8)).slice(0, 16)}"></label>
+    <label><span>Committed due</span><input type="datetime-local" data-job-end="${job.id}" value="${String(job.committed_due_at || operationsDemoTimestamp(2, 16)).slice(0, 16)}"></label>
     <label><span>Assignee</span><select data-job-assignee="${job.id}"><option value="">Keep current assignment</option>${eligibleAssignees.map((user) => `<option value="${user.id}" ${user.id === job.assignee_user_id ? "selected" : ""}>${escapeHTML(user.display_name)}</option>`).join("")}</select></label>
-    <button type="button" class="primary-button" data-job-action="schedule" data-job-id="${job.id}">Commit Schedule</button>
+    <button type="button" class="primary-button" data-job-action="schedule" data-job-id="${job.id}">${job.status === "Scheduled" ? "Update Routing" : "Commit Routing"}</button>
   </div>` : "";
   const gatekeeperActions = controller ? `<div class="request-actions operations-job-actions">
-    ${job.status === "Scheduled" ? `<button type="button" class="primary-button" data-job-action="release" data-job-id="${job.id}">Release to Technician</button>` : ""}
-    ${job.status === "Work Complete" && !state.serviceSignoffs.some((signoff) => signoff.service_work_order_id === workOrder?.id && signoff.party_type === "Internal") ? `<button type="button" class="secondary-button" data-job-signoff="Internal" data-job-id="${job.id}">Record Internal Signoff</button>` : ""}
-    ${job.status === "Work Complete" && !state.serviceSignoffs.some((signoff) => signoff.service_work_order_id === workOrder?.id && signoff.party_type === "Customer") ? `<button type="button" class="secondary-button" data-job-signoff="Customer" data-job-id="${job.id}">Record Customer Signoff</button>` : ""}
-    ${job.status === "Work Complete" && state.serviceSignoffs.filter((signoff) => signoff.service_work_order_id === workOrder?.id).length >= 2 ? `<button type="button" class="primary-button" data-job-action="complete_signoff" data-job-id="${job.id}">Complete Signoff Stage</button>` : ""}
-    ${job.status === "Signoff Complete" ? `<button type="button" class="primary-button" data-job-action="close" data-job-id="${job.id}">Close Service Work</button>` : ""}
+    ${job.job_type === "service_job" && job.status === "Scheduled" ? `<button type="button" class="primary-button" data-job-action="release" data-job-id="${job.id}">Release to Technician</button>` : ""}
+    ${job.job_type === "service_job" && job.status === "Work Complete" && !state.serviceSignoffs.some((signoff) => signoff.service_work_order_id === workOrder?.id && signoff.party_type === "Internal") ? `<button type="button" class="secondary-button" data-job-signoff="Internal" data-job-id="${job.id}">Record Internal Signoff</button>` : ""}
+    ${job.job_type === "service_job" && job.status === "Work Complete" && !state.serviceSignoffs.some((signoff) => signoff.service_work_order_id === workOrder?.id && signoff.party_type === "Customer") ? `<button type="button" class="secondary-button" data-job-signoff="Customer" data-job-id="${job.id}">Record Customer Signoff</button>` : ""}
+    ${job.job_type === "service_job" && job.status === "Work Complete" && state.serviceSignoffs.filter((signoff) => signoff.service_work_order_id === workOrder?.id).length >= 2 ? `<button type="button" class="primary-button" data-job-action="complete_signoff" data-job-id="${job.id}">Complete Signoff Stage</button>` : ""}
+    ${job.job_type === "service_job" && job.status === "Signoff Complete" ? `<button type="button" class="primary-button" data-job-action="close" data-job-id="${job.id}">Close Service Work</button>` : ""}
+    ${build ? `<button type="button" class="primary-button" data-operations-build-open="${build.id}">Open Controlled Build Order</button>` : ""}
   </div>` : "";
-  const technicianActions = technician ? `<div class="request-actions operations-job-actions">
+  const technicianActions = technician && job.job_type === "service_job" ? `<div class="request-actions operations-job-actions">
     ${job.status === "Released" ? `<button type="button" class="primary-button" data-job-action="start" data-job-id="${job.id}">Start Work</button>` : ""}
     ${job.status === "In Progress" && completed === checkpoints.length ? `<button type="button" class="primary-button" data-job-action="complete_work" data-job-id="${job.id}">Mark Work Complete</button>` : ""}
   </div>` : "";
   return `<article class="operations-job-card" data-operations-job-card="${job.id}">
-    <header><div><span>${escapeHTML(job.job_number || job.id)} · ${escapeHTML(job.job_type || "operations")}</span><h3>${escapeHTML(job.title)}</h3><p>${request ? `${escapeHTML(request.request_number)} · ${escapeHTML(workOrder?.work_order_number || "Work Order pending")}` : "Linked Build Order"}</p></div><div class="operations-job-status"><b class="request-stage is-${slugify(job.status)}">${escapeHTML(job.status)}</b><small>GP ${escapeHTML(job.gp_link_status || "Pending")}</small></div></header>
-    <div class="request-facts"><div><span>Priority</span><strong>${escapeHTML(job.priority)}</strong></div><div><span>Work center</span><strong>${escapeHTML(state.workCenters.find((center) => center.id === job.work_center_id)?.name || "Not assigned")}</strong></div><div><span>Assignee</span><strong>${escapeHTML(job.assignee_name || "Not assigned")}</strong></div><div><span>Commitment</span><strong>${operationDateTime(assignment?.ends_at || job.committed_due_at)}</strong></div></div>
+    <header><div><span>${escapeHTML(job.job_number || job.id)} · ${escapeHTML(workItemType)}</span><h3>${escapeHTML(job.title)}</h3><p>${request ? `${escapeHTML(request.request_number)} · ${escapeHTML(workOrder?.work_order_number || "Work Order pending")}` : build ? `${escapeHTML(build.buildNumber || "Build Order pending")} · ${escapeHTML(build.part || "Part pending")}` : "Linked Operations Job"}</p></div><div class="operations-job-status"><b class="request-stage is-${slugify(job.status)}">${escapeHTML(job.status)}</b><small>GP ${escapeHTML(job.gp_link_status || "Pending")}</small></div></header>
+    <div class="request-facts"><div><span>Work item</span><strong>${escapeHTML(workItemType)}</strong></div><div><span>Priority</span><strong>${escapeHTML(job.priority)}</strong></div><div><span>Current route</span><strong>${escapeHTML(state.workCenters.find((center) => center.id === job.work_center_id)?.name || "Not assigned")}</strong></div><div><span>Assignee</span><strong>${escapeHTML(job.assignee_name || "Not assigned")}</strong></div><div><span>Commitment</span><strong>${operationDateTime(assignment?.ends_at || job.committed_due_at)}</strong></div></div>
     ${job.exception_detail ? `<div class="request-exception"><strong>${escapeHTML(job.exception_code || "Exception")}</strong><span>${escapeHTML(job.exception_detail)}</span></div>` : ""}
     ${scopeControls}${scheduleControls}
-    <div class="checkpoint-list"><header><strong>Controlled checkpoints</strong><span>${completed} of ${checkpoints.length} complete</span></header>${checkpoints.map((checkpoint) => {
+    ${operationsRoutingHtml(job)}
+    <div class="checkpoint-list"><header><strong>${build ? "Specialized execution" : "Controlled checkpoints"}</strong><span>${build ? "Build Order" : `${completed} of ${checkpoints.length} complete`}</span></header>${checkpoints.map((checkpoint) => {
       const definition = state.operationsCheckpointDefinitions.find((entry) => entry.checkpoint_key === checkpoint.checkpoint_key && Number(entry.version) === Number(checkpoint.checkpoint_version));
       const ownerRole = checkpoint.owner_role || definition?.owner_role || "Shared";
       const canUpdate = controller || (technician && ["service_technician", "shop"].includes(ownerRole));
       return `<div class="checkpoint-row is-${slugify(checkpoint.status)}"><span>${["Complete", "Waived"].includes(checkpoint.status) ? "✓" : checkpoint.status === "Blocked" ? "!" : "○"}</span><div><strong>${escapeHTML(checkpoint.checkpoint_name || definition?.name || checkpoint.checkpoint_key)}</strong><small>${escapeHTML(ownerRole)} · ${escapeHTML(checkpoint.status)}${checkpoint.evidence_note ? ` · ${escapeHTML(checkpoint.evidence_note)}` : ""}</small></div>${canUpdate && ["Released", "In Progress"].includes(job.status) && !["Complete", "Waived"].includes(checkpoint.status) ? `<button type="button" class="table-button" data-checkpoint-complete="${escapeHTML(checkpoint.checkpoint_key)}" data-job-id="${job.id}">Complete</button>` : ""}</div>`;
-    }).join("") || '<p class="quote-list-empty">Checkpoint template pending.</p>'}</div>
+    }).join("") || (build ? '<p class="quote-list-empty">Routing and capacity stay here; BOM, release, consumption, output, and completion remain controlled on the linked Build Order.</p>' : '<p class="quote-list-empty">Checkpoint template pending.</p>')}</div>
     ${gatekeeperActions}${technicianActions}
   </article>`;
 }
@@ -3718,12 +3867,15 @@ async function runJobAction(job, action, card) {
       const endsAt = card.querySelector(`[data-job-end="${CSS.escape(job.id)}"]`)?.value;
       const assigneeUserId = card.querySelector(`[data-job-assignee="${CSS.escape(job.id)}"]`)?.value || null;
       if (!workCenterId || !startsAt || !endsAt) throw new Error("Choose a work center and complete schedule window.");
-      if (!isPublicDemo) await postOperationsAction({ operation: "schedule_job", operationsJobId: job.id, workCenterId, slotNumber: 1, startsAt, endsAt, reason: "Gatekeeper capacity commitment", assigneeUserId });
+      const center = state.workCenters.find((entry) => entry.id === workCenterId);
+      const reason = `Gatekeeper routed ${String(job.subject_type || operationsItemType(operationsBuildForJob(job)?.part, job.job_type)).toLowerCase()} work to ${center?.name || workCenterId}`;
+      if (!isPublicDemo) await postOperationsAction({ operation: "schedule_job", operationsJobId: job.id, workCenterId, slotNumber: 1, startsAt, endsAt, reason, assigneeUserId });
       else {
         job.status = "Scheduled"; job.work_center_id = workCenterId; job.planned_start_at = new Date(startsAt).toISOString(); job.committed_due_at = new Date(endsAt).toISOString(); job.updated_at = new Date().toISOString();
         if (assigneeUserId) { job.assignee_user_id = assigneeUserId; job.assignee_name = state.operationalUsers.find((user) => user.id === assigneeUserId)?.display_name || "Assigned employee"; }
+        const revision = state.operationsJobAssignments.filter((entry) => entry.job_id === job.id).reduce((highest, entry) => Math.max(highest, Number(entry.revision || 0)), 0) + 1;
         state.operationsJobAssignments.filter((entry) => entry.job_id === job.id && !entry.superseded_at).forEach((entry) => { entry.superseded_at = job.updated_at; });
-        state.operationsJobAssignments.unshift({ id: Date.now(), job_id: job.id, work_center_id: workCenterId, slot_number: 1, starts_at: job.planned_start_at, ends_at: job.committed_due_at, revision: 1, reason: "Gatekeeper capacity commitment", created_at: job.updated_at, superseded_at: null });
+        state.operationsJobAssignments.unshift({ id: Date.now(), job_id: job.id, work_center_id: workCenterId, slot_number: 1, starts_at: job.planned_start_at, ends_at: job.committed_due_at, revision, reason, created_at: job.updated_at, superseded_at: null });
       }
     } else if (!isPublicDemo) {
       await postOperationsAction({ operation: "transition_service_job", operationsJobId: job.id, action, note: "Recorded from the Operations Board" });
@@ -3740,7 +3892,7 @@ async function runJobAction(job, action, card) {
       }
     }
     if (isPublicDemo) {
-      state.operationsJobEvents.unshift({ event_key: `oje-${Date.now()}`, job_id: job.id, event_type: action, summary: `Operations action: ${action.replaceAll("_", " ")}`, detail: "Recorded from the portfolio Operations Board.", created_at: new Date().toISOString() });
+      state.operationsJobEvents.unshift({ event_key: `oje-${Date.now()}`, job_id: job.id, event_type: action, summary: action === "schedule" ? "Gatekeeper routing updated" : `Operations action: ${action.replaceAll("_", " ")}`, detail: "Recorded from the portfolio Operations Board.", created_at: new Date().toISOString() });
       saveOperationsSnapshot();
     }
     renderOperationsBoardWorkspace();
@@ -3792,17 +3944,18 @@ function renderOperationsBoardWorkspace() {
   const buildInbox = state.buildRequests.filter((request) => request.status === "Submitted");
   const activeJobs = state.operationsJobs.filter((job) => !["Closed", "Cancelled"].includes(job.status))
     .sort((a, b) => Number(a.priority || 3) - Number(b.priority || 3));
+  const activeShopJobs = activeJobs.filter((job) => ["component_build", "rig_build"].includes(job.job_type));
   const exceptions = activeJobs.filter((job) => job.exception_code);
   const controller = state.operationsBoardRole === "service_controller";
   elements.overlayBody.innerHTML = `<div class="workbench production-workbench operations-board-workbench">
-    <div class="operations-toolbar"><div><strong>Operations Board</strong><span>One controlled queue for capacity and exceptions; specialized Build Orders and Service Work Orders stay distinct underneath.</span></div><button type="button" class="secondary-button" data-service-open-requests>Open Requester View</button></div>
-    <div class="build-role-switch"><div><span>VIEW AS</span><strong>${controller ? "Gatekeeper / Controller" : "Assigned Service Technician"}</strong></div><div><button type="button" data-operations-role="service_controller" class="${controller ? "is-active" : ""}">Gatekeeper</button><button type="button" data-operations-role="service_technician" class="${!controller ? "is-active" : ""}">Technician</button></div></div>
-    <div class="production-boundary ${controller ? "is-controller" : ""}"><span>${controller ? "CONTROL AUTHORITY" : "EXECUTION VIEW"}</span><strong>${controller ? "Every build and service commitment passes through the gatekeeper." : "Technicians execute assigned work and document checkpoint evidence."}</strong><p>${controller ? "The gatekeeper accepts or returns demand, separates request from execution, commits scarce bays, sets priority, releases work, manages exceptions, and closes only after signoff." : "Schedule, priority, customer promise, and closeout authority remain locked. The technician starts released work, records evidence, and marks the work itself complete."}</p></div>
-    <div class="order-metric-grid"><div><span>Build decisions</span><strong>${buildInbox.length}</strong></div><div><span>Service decisions</span><strong>${serviceInbox.length}</strong></div><div><span>Active Operations Jobs</span><strong>${activeJobs.length}</strong></div><div><span>Exceptions</span><strong>${exceptions.length}</strong></div></div>
-    ${controller ? `<section class="production-queue-section combined-gatekeeper-inbox"><header><div><span>01</span><h3>Combined Gatekeeper Inbox</h3></div><p>Demand is reviewed here before either specialized execution document is released.</p></header>
-      <div class="operations-inbox-columns"><div><header><strong>Sales Build Requests</strong><span>${buildInbox.length}</span></header><div class="request-card-list">${buildInbox.map((request) => buildRequestCardHtml(request, "controller")).join("") || '<div class="request-empty-state"><strong>Build inbox clear.</strong></div>'}</div></div><div><header><strong>Service Requests</strong><span>${serviceInbox.length}</span></header><div class="request-card-list">${serviceInbox.map((request) => serviceRequestCardHtml(request, "controller")).join("") || '<div class="request-empty-state"><strong>Service inbox clear.</strong></div>'}</div></div></div>
+    <div class="operations-toolbar"><div><strong>Operations Board</strong><span>One controlled queue for tooling, rig-part, build, and service capacity; specialized Build Orders and Service Work Orders stay distinct underneath.</span></div><button type="button" class="secondary-button" data-service-open-requests>Open Requester View</button></div>
+    <div class="build-role-switch"><div><span>VIEW AS</span><strong>${controller ? "Gatekeeper / Controller" : "Assigned Technician / Shop"}</strong></div><div><button type="button" data-operations-role="service_controller" class="${controller ? "is-active" : ""}">Gatekeeper</button><button type="button" data-operations-role="service_technician" class="${!controller ? "is-active" : ""}">Execution</button></div></div>
+    <div class="production-boundary ${controller ? "is-controller" : ""}"><span>${controller ? "CONTROL AUTHORITY" : "EXECUTION VIEW"}</span><strong>${controller ? "Every tooling, rig-part, build, and service commitment passes through the gatekeeper." : "Technicians and shop employees execute assigned work and document evidence."}</strong><p>${controller ? "The gatekeeper accepts or returns demand, decides whether work routes to the Machine Shop, Preassembly Work Bay, or another controlled center, commits capacity, manages rerouting, and keeps release authority on the specialized work document." : "Route, capacity, priority, and customer promises remain locked. Execution occurs only after the controlled Build Order or Service Work Order is released."}</p></div>
+    <div class="order-metric-grid"><div><span>Tooling / rig-part requests</span><strong>${buildInbox.length}</strong></div><div><span>Service decisions</span><strong>${serviceInbox.length}</strong></div><div><span>Active shop routes</span><strong>${activeShopJobs.length}</strong></div><div><span>Exceptions</span><strong>${exceptions.length}</strong></div></div>
+    ${controller ? `<section class="production-queue-section combined-gatekeeper-inbox"><header><div><span>01</span><h3>Combined Gatekeeper Inbox</h3></div><p>Tooling, rig-part, and service demand is reviewed here before a specialized execution document is released.</p></header>
+      <div class="operations-inbox-columns"><div><header><strong>Tooling &amp; Rig-Part Build Requests</strong><span>${buildInbox.length}</span></header><div class="request-card-list">${buildInbox.map((request) => buildRequestCardHtml(request, "controller")).join("") || '<div class="request-empty-state"><strong>Shop-build inbox clear.</strong></div>'}</div></div><div><header><strong>Service Requests</strong><span>${serviceInbox.length}</span></header><div class="request-card-list">${serviceInbox.map((request) => serviceRequestCardHtml(request, "controller")).join("") || '<div class="request-empty-state"><strong>Service inbox clear.</strong></div>'}</div></div></div>
     </section>` : ""}
-    <section class="production-queue-section"><header><div><span>${controller ? "02" : "01"}</span><h3>${controller ? "Committed Operations" : "My Assigned Service Work"}</h3></div><p>Capacity, checkpoints, events, and exceptions live on the shared Operations Job.</p></header><div class="operations-job-list">${activeJobs.map(operationJobCardHtml).join("") || '<div class="request-empty-state"><strong>No active Operations Jobs.</strong></div>'}</div></section>
+    <section class="production-queue-section"><header><div><span>${controller ? "02" : "01"}</span><h3>${controller ? "Committed Operations &amp; Shop Routing" : "My Assigned Work"}</h3></div><p>Machine Shop and Preassembly commitments, routing revisions, capacity, checkpoints, and exceptions live on the shared Operations Job.</p></header><div class="operations-job-list">${activeJobs.map(operationJobCardHtml).join("") || '<div class="request-empty-state"><strong>No active Operations Jobs.</strong></div>'}</div></section>
   </div>`;
 }
 
@@ -4004,7 +4157,7 @@ function renderBuildModal() {
           <label class="field"><span>Committed completion</span><input type="date" data-build-meta-field="committedDueDate" value="${escapeHTML(build.committedDueDate || "")}" ${locked}></label>
           <label class="field"><span>Customer need date</span><input type="date" value="${escapeHTML(build.requestedDueDate || "")}" disabled></label>
           <label class="field"><span>Priority</span><select data-build-meta-field="priority" ${locked}>${[1, 2, 3, 4, 5].map((priority) => `<option value="${priority}" ${Number(build.priority) === priority ? "selected" : ""}>${priority}${priority === 1 ? " · Rush" : priority === 5 ? " · Lowest" : ""}</option>`).join("")}</select></label>
-          <label class="field"><span>Shop assignment</span><select data-build-meta-field="shopAssigneeName" ${locked}><option value="">Choose a cell...</option>${productionShopAssignments.map((name) => `<option ${build.shopAssigneeName === name ? "selected" : ""}>${escapeHTML(name)}</option>`).join("")}</select></label>
+          <label class="field"><span>Initial route / work center</span><select data-build-meta-field="shopAssigneeName" ${locked}><option value="">Choose a controlled work center...</option>${productionShopAssignments.map((name) => `<option ${build.shopAssigneeName === name ? "selected" : ""}>${escapeHTML(name)}</option>`).join("")}</select></label>
           <label class="field"><span>Location</span><input data-build-meta-field="locationCode" value="${escapeHTML(build.locationCode || "MAIN")}" ${locked}></label>
         </div>
         <div class="order-lines ${build.components.length ? "" : "is-empty"}">
@@ -4021,7 +4174,7 @@ function renderBuildModal() {
       <aside class="quote-summary"><h3>Progress</h3>
         <div class="summary-row"><span>Target quantity</span><strong>${build.quantity} ${escapeHTML(build.uom || "EA")}</strong></div>
         <div class="summary-row"><span>Built so far</span><strong>${build.builtQty} ${escapeHTML(build.uom || "EA")}</strong></div>
-        <div class="summary-row"><span>Assigned shop</span><strong>${escapeHTML(build.shopAssigneeName || "Not assigned")}</strong></div>
+        <div class="summary-row"><span>Initial work center</span><strong>${escapeHTML(build.shopAssigneeName || "Not assigned")}</strong></div>
         <div class="summary-row"><span>Committed</span><strong>${escapeHTML(build.committedDueDate || "Not committed")}</strong></div>
         ${executionEditable ? `<label class="summary-input"><span>Qty to finish this pass</span><input type="number" min="0" max="${remaining}" step="1" data-build-meta-field="qtyToFinish" value="${build.qtyToFinish || 0}"></label>` : ""}
         <p class="quote-state">${isPublicDemo ? "Portfolio sandbox: edits stay only in this browser." : "Every edit here saves and is visible to the whole team."}</p>
@@ -5121,6 +5274,12 @@ elements.overlayBody.addEventListener("click", (event) => {
   if (event.target.closest("[data-service-editor-close]")) { state.serviceRequestEditorOpen = false; state.serviceRequestFormError = ""; renderServiceRequestsWorkspace(); return; }
   if (event.target.closest("[data-service-open-requests]")) { openWorkspace("serviceRequests"); return; }
   if (event.target.closest("[data-open-operations-board]")) { openWorkspace("operationsBoard"); return; }
+  const operationsBuildOpen = event.target.closest("[data-operations-build-open]");
+  if (operationsBuildOpen) {
+    state.buildWorkspaceRole = state.operationsBoardRole === "service_controller" ? "production_controller" : "shop";
+    openBuildModal(operationsBuildOpen.dataset.operationsBuildOpen);
+    return;
+  }
   const operationsRole = event.target.closest("[data-operations-role]");
   if (operationsRole) { state.operationsBoardRole = operationsRole.dataset.operationsRole; renderOperationsBoardWorkspace(); return; }
   const serviceTransition = event.target.closest("[data-service-transition]");

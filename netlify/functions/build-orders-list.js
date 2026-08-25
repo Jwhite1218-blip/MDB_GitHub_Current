@@ -31,6 +31,8 @@ function toCamelBuild(row) {
     lastModifiedByInitials: row.last_modified_by_initials,
     lastModifiedByName: row.last_modified_by_name,
     buildRequestId: row.build_request_id,
+    operationsJobId: row.operations_job_id,
+    workType: row.work_type || "component_build",
     controllerUserId: row.controller_user_id,
     shopAssigneeUserId: row.shop_assignee_user_id,
     priority: row.priority,

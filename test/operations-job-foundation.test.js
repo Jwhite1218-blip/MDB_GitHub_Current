@@ -14,10 +14,24 @@ const operationsApi = fs.readFileSync(
   path.join(root, "netlify", "functions", "operations-jobs.mts"),
   "utf8"
 );
+const shopCentersMigration = fs.readFileSync(
+  path.join(root, "supabase", "migrations", "20260825103000_operations_shop_work_centers.sql"),
+  "utf8"
+);
 
 test("operations and service migration is explicitly transactional", () => {
   assert.match(migration, /^begin;/m);
   assert.match(migration, /^commit;/m);
+});
+
+test("machine shop and preassembly are controlled Operations Job destinations", () => {
+  assert.match(shopCentersMigration, /^begin;/m);
+  assert.match(shopCentersMigration, /^commit;/m);
+  assert.match(shopCentersMigration, /'machine-shop', 'MACHINE', 'Machine Shop', 'shop_cell'/);
+  assert.match(shopCentersMigration, /'preassembly-work-bay', 'PREASM', 'Preassembly Work Bay', 'build_bay'/);
+  assert.match(shopCentersMigration, /capacity, is_active/);
+  assert.match(shopCentersMigration, /v_existing_committed_due_at/);
+  assert.match(shopCentersMigration, /coalesce\(v_existing_committed_due_at, coalesce\(new\.committed_due_date/);
 });
 
 test("requests, shared execution jobs, and specialized work documents stay separate", () => {
