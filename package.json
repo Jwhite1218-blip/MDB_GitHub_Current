@@ -9,6 +9,7 @@
     "start": "node scripts/serve-demo.mjs",
     "test": "node --test test/*.test.js",
     "check:contracts": "node --check netlify/functions/_production-control.js",
+    "compare:dumps": "node scripts/data-dump-compare.mjs",
     "intake:inventory": "node scripts/intake-inventory.mjs",
     "intake:plan": "node scripts/intake-plan.mjs"
   },

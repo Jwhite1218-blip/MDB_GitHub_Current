@@ -1,0 +1,29 @@
+{
+  "customers": {
+    "customerNumber": "Customer Number",
+    "customerName": "Customer Name",
+    "status": "Status",
+    "city": "City",
+    "state": "State",
+    "postalCode": "ZIP Code",
+    "country": "Country",
+    "phone": "Phone",
+    "email": "Email",
+    "lastActivityDate": "Last Activity Date"
+  },
+  "sales": {
+    "partNumber": "Item Number",
+    "description": "Item Description",
+    "customerNumber": "Customer Number",
+    "customerName": "Customer Name",
+    "documentNumber": "Invoice Number",
+    "documentDate": "Invoice Date",
+    "documentType": "Document Type",
+    "quantity": "Quantity Sold",
+    "extendedAmount": "Net Sales",
+    "unitPrice": "Unit Price",
+    "itemClass": "Item Class",
+    "category": "Category",
+    "uom": "UOM"
+  }
+}

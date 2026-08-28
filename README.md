@@ -214,6 +214,15 @@ turns it into bounded, type-specific analysis batches before any document
 contents are opened. The handling and review gates are defined in
 `docs/architecture/CONTROLLED_EVIDENCE_INTAKE.md`.
 
+Complete customer and year-to-date Tooling / Parts exports can be preflighted
+and compared with `npm run compare:dumps`. The comparison reads only copied
+CSV/TSV/JSON files beneath `private-intake/`, auto-detects common GP/report
+headers, preserves leading-zero identifiers, and writes all detailed results
+back beneath the same ignored boundary. Exact identifiers establish coverage;
+name and description similarity creates review candidates only. See
+`docs/operations/DATA_DUMP_COMPARISON_RUNBOOK.md` for the controlled sequence,
+source fields, interpretation gates, and delivery-day checklist.
+
 ### Public portfolio boundary
 
 The deployed public site is a sandbox, not an operational login surface:
