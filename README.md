@@ -1,5 +1,7 @@
 # Mobile Drill Brain - Current Demo Repository
 
+> **Production discovery — 2026-09-09:** Tested Gubbins parts-planning logic plus PyJobShop can connect material shortages to proposed production schedules. Start with a read-only material-readiness panel on the existing Build Order. [Implementation handoff and known limits](docs/architecture/GUBBINS_PRODUCTION_OPPORTUNITY.md). Proposal only; nothing is installed or enabled in production.
+
 This repository contains the current MDB demo, the controlled documents used to reason about it, and the structured source data used to build it.
 
 ## Authority and precedence

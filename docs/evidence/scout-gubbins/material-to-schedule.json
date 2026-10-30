@@ -1,0 +1,312 @@
+{
+  "kind": "synthetic integration experiment, not an app integration",
+  "buildable_units": 9,
+  "assumed_durations": {
+    "prep": 2,
+    "weld": 4,
+    "inspect": 1
+  },
+  "time_unit": "arbitrary units, not measured shop times",
+  "schedule_finish": 39,
+  "lower_bound_explanation": "2 units before first weld + 9*4 on weld bottleneck + 1 for final inspection = 39",
+  "solver_status": "Optimal",
+  "tasks": [
+    {
+      "mode": 0,
+      "resources": [
+        0
+      ],
+      "start": 8,
+      "end": 10,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 1,
+      "resources": [
+        1
+      ],
+      "start": 30,
+      "end": 34,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 2,
+      "resources": [
+        2
+      ],
+      "start": 34,
+      "end": 35,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 3,
+      "resources": [
+        0
+      ],
+      "start": 2,
+      "end": 4,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 4,
+      "resources": [
+        1
+      ],
+      "start": 14,
+      "end": 18,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 5,
+      "resources": [
+        2
+      ],
+      "start": 18,
+      "end": 19,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 6,
+      "resources": [
+        0
+      ],
+      "start": 10,
+      "end": 12,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 7,
+      "resources": [
+        1
+      ],
+      "start": 18,
+      "end": 22,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 8,
+      "resources": [
+        2
+      ],
+      "start": 22,
+      "end": 23,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 9,
+      "resources": [
+        0
+      ],
+      "start": 0,
+      "end": 2,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 10,
+      "resources": [
+        1
+      ],
+      "start": 2,
+      "end": 6,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 11,
+      "resources": [
+        2
+      ],
+      "start": 6,
+      "end": 7,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 12,
+      "resources": [
+        0
+      ],
+      "start": 6,
+      "end": 8,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 13,
+      "resources": [
+        1
+      ],
+      "start": 10,
+      "end": 14,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 14,
+      "resources": [
+        2
+      ],
+      "start": 14,
+      "end": 15,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 15,
+      "resources": [
+        0
+      ],
+      "start": 4,
+      "end": 6,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 16,
+      "resources": [
+        1
+      ],
+      "start": 6,
+      "end": 10,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 17,
+      "resources": [
+        2
+      ],
+      "start": 10,
+      "end": 11,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 18,
+      "resources": [
+        0
+      ],
+      "start": 14,
+      "end": 16,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 19,
+      "resources": [
+        1
+      ],
+      "start": 26,
+      "end": 30,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 20,
+      "resources": [
+        2
+      ],
+      "start": 30,
+      "end": 31,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 21,
+      "resources": [
+        0
+      ],
+      "start": 16,
+      "end": 18,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 22,
+      "resources": [
+        1
+      ],
+      "start": 34,
+      "end": 38,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 23,
+      "resources": [
+        2
+      ],
+      "start": 38,
+      "end": 39,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 24,
+      "resources": [
+        0
+      ],
+      "start": 12,
+      "end": 14,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 25,
+      "resources": [
+        1
+      ],
+      "start": 22,
+      "end": 26,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    },
+    {
+      "mode": 26,
+      "resources": [
+        2
+      ],
+      "start": 26,
+      "end": 27,
+      "idle": 0,
+      "breaks": 0,
+      "present": true
+    }
+  ]
+}

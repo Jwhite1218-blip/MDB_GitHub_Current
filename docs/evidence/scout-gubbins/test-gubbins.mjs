@@ -1,0 +1,28 @@
+import assert from 'node:assert/strict';
+import {writeFileSync} from 'node:fs';
+import {buildableCount,rollUpBuildable,planAssembly} from './gubbins/src/features/inventory/kit-availability.ts';
+import {planTransfer} from './gubbins/src/features/inventory/stock.ts';
+import {planBatchConsumption,planBatchSelection} from './gubbins/src/features/inventory/batches.ts';
+import {validateKitLink,findKitCycleBreaks} from './gubbins/src/features/inventory/kits.ts';
+const results=[];function test(name,fn){try{results.push({test:name,status:'pass',actual:fn()});}catch(e){results.push({test:name,status:'fail',error:e.message});}}
+const leaf=(id,stock)=>({itemId:id,name:id,stock,components:[]});
+const kit=(id,stock,lines)=>({itemId:id,name:id,stock,components:lines.map(([quantity,node])=>({quantity,node}))});
+const shaft=leaf('shaft',12),flight=leaf('flight',70),bearing=leaf('bearing',18);
+const auger=kit('auger',0,[[1,shaft],[6,flight],[2,bearing]]);
+test('auger material ceiling and bottleneck',()=>{const r=rollUpBuildable(auger);assert.equal(r.count,9);assert.ok(r.limiting.some(x=>x.itemId==='bearing'));return r;});
+test('adding bearings moves bottleneck to flights',()=>{const r=rollUpBuildable(kit('auger',0,[[1,shaft],[6,flight],[2,leaf('bearing',24)]]));assert.equal(r.count,11);assert.ok(r.limiting.some(x=>x.itemId==='flight'));return r;});
+test('assembly draws exact quantities',()=>{const r=planAssembly(auger,9,true);assert.equal(r.feasible,true);assert.deepEqual(r.steps[0].draws,[{itemId:'shaft',quantity:9},{itemId:'flight',quantity:54},{itemId:'bearing',quantity:18}]);return r;});
+test('oversized order names shortage',()=>{const r=planAssembly(auger,10,true);assert.equal(r.feasible,false);assert.ok(r.shortfalls.some(x=>x.itemId==='bearing'&&x.needed===20&&x.available===18));return r;});
+test('shared raw material is not counted twice across subassemblies',()=>{const steel=leaf('steel',30);const tree=kit('assembly',0,[[1,kit('A',0,[[2,steel]])],[1,kit('B',0,[[3,steel]])]]);assert.equal(rollUpBuildable(tree).count,6);assert.equal(planAssembly(tree,7,true).feasible,false);return planAssembly(tree,6,true);});
+test('existing subassemblies reduce raw-material demand',()=>{const steel=leaf('steel',30);const tree=kit('assembly',0,[[1,kit('A',2,[[2,steel]])],[1,kit('B',0,[[3,steel]])]]);assert.equal(rollUpBuildable(tree).count,6);const p=planAssembly(tree,6,true);assert.equal(p.feasible,true);assert.equal(p.steps.find(x=>x.itemId==='A').buildQty,4);return p;});
+test('fractional recipe roll-up agrees with feasible plan',()=>{const tree=kit('portion',0,[[.25,leaf('kg-flour',1)]]);const r=rollUpBuildable(tree);assert.equal(planAssembly(tree,4,true).feasible,true);assert.equal(r.count,4,JSON.stringify(r));return r;});
+test('100 shared-material cases match independent arithmetic',()=>{for(let n=0;n<100;n++){const shared=leaf('bolt',n);const tree=kit('unit',0,[[1,kit('left',0,[[2,shared]])],[1,kit('right',0,[[3,shared]])]]);const expected=Math.floor(n/5);assert.equal(rollUpBuildable(tree).count,expected);assert.equal(planAssembly(tree,expected+1,true).feasible,false);}return {cases:100};});
+const batches=[{batchKey:'late',quantity:8,expiryDate:300,batchNumber:null,lotNumber:null},{batchKey:'early',quantity:3,expiryDate:100,batchNumber:null,lotNumber:null},{batchKey:'none',quantity:5,expiryDate:null,batchNumber:null,lotNumber:null}];
+test('consume earliest-expiring batch first',()=>{const r=planBatchConsumption(batches,6);assert.deepEqual(r,{consumed:[{batchKey:'early',amount:3},{batchKey:'late',amount:3}],shortfall:0});return r;});
+test('batch shortage is explicit',()=>{const r=planBatchConsumption(batches,20);assert.equal(r.shortfall,4);assert.equal(r.consumed.reduce((s,x)=>s+x.amount,0),16);return r;});
+test('selected lot cannot silently spill into another lot',()=>{const r=planBatchSelection(batches,'early',5);assert.deepEqual(r,{consumed:[{batchKey:'early',amount:3}],shortfall:2});return r;});
+test('transfer cannot overdraw source',()=>{assert.deepEqual(planTransfer(3,8),{quantity:3,ok:true,clamped:true});assert.equal(planTransfer(3,-1).ok,false);});
+test('circular assembly guard and deterministic repair',()=>{assert.equal(validateKitLink({kitId:'a',componentId:'b',componentDescendantIds:['a']}),'CYCLE');const edges=[{id:'1',kitId:'a',componentId:'b',createdAt:1},{id:'2',kitId:'b',componentId:'a',createdAt:2}];assert.deepEqual(findKitCycleBreaks(edges).map(x=>x.id),['2']);assert.deepEqual(findKitCycleBreaks([...edges].reverse()).map(x=>x.id),['2']);});
+writeFileSync(new URL('./gubbins-results.json',import.meta.url),JSON.stringify({checked_at:new Date().toISOString(),revision:'71ffeafc14fa53459be6bb9c3c1042a835d18af2',results},null,2));
+for(const r of results)console.log(r.status,r.test,r.error??'');
+process.exitCode=results.every(r=>r.status==='pass')?0:1;

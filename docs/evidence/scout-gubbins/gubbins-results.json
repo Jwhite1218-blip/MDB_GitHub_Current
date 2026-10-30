@@ -1,0 +1,244 @@
+{
+  "checked_at": "2026-09-09T04:13:14.908Z",
+  "revision": "71ffeafc14fa53459be6bb9c3c1042a835d18af2",
+  "results": [
+    {
+      "test": "auger material ceiling and bottleneck",
+      "status": "pass",
+      "actual": {
+        "count": 9,
+        "limiting": [
+          {
+            "itemId": "bearing",
+            "name": "bearing"
+          }
+        ],
+        "subKitCount": 0
+      }
+    },
+    {
+      "test": "adding bearings moves bottleneck to flights",
+      "status": "pass",
+      "actual": {
+        "count": 11,
+        "limiting": [
+          {
+            "itemId": "flight",
+            "name": "flight"
+          }
+        ],
+        "subKitCount": 0
+      }
+    },
+    {
+      "test": "assembly draws exact quantities",
+      "status": "pass",
+      "actual": {
+        "feasible": true,
+        "steps": [
+          {
+            "itemId": "auger",
+            "name": "auger",
+            "buildQty": 9,
+            "draws": [
+              {
+                "itemId": "shaft",
+                "quantity": 9
+              },
+              {
+                "itemId": "flight",
+                "quantity": 54
+              },
+              {
+                "itemId": "bearing",
+                "quantity": 18
+              }
+            ]
+          }
+        ],
+        "shortfalls": []
+      }
+    },
+    {
+      "test": "oversized order names shortage",
+      "status": "pass",
+      "actual": {
+        "feasible": false,
+        "steps": [],
+        "shortfalls": [
+          {
+            "itemId": "bearing",
+            "name": "bearing",
+            "needed": 20,
+            "available": 18
+          }
+        ]
+      }
+    },
+    {
+      "test": "shared raw material is not counted twice across subassemblies",
+      "status": "pass",
+      "actual": {
+        "feasible": true,
+        "steps": [
+          {
+            "itemId": "A",
+            "name": "A",
+            "buildQty": 6,
+            "draws": [
+              {
+                "itemId": "steel",
+                "quantity": 12
+              }
+            ]
+          },
+          {
+            "itemId": "B",
+            "name": "B",
+            "buildQty": 6,
+            "draws": [
+              {
+                "itemId": "steel",
+                "quantity": 18
+              }
+            ]
+          },
+          {
+            "itemId": "assembly",
+            "name": "assembly",
+            "buildQty": 6,
+            "draws": [
+              {
+                "itemId": "A",
+                "quantity": 6
+              },
+              {
+                "itemId": "B",
+                "quantity": 6
+              }
+            ]
+          }
+        ],
+        "shortfalls": []
+      }
+    },
+    {
+      "test": "existing subassemblies reduce raw-material demand",
+      "status": "pass",
+      "actual": {
+        "feasible": true,
+        "steps": [
+          {
+            "itemId": "A",
+            "name": "A",
+            "buildQty": 4,
+            "draws": [
+              {
+                "itemId": "steel",
+                "quantity": 8
+              }
+            ]
+          },
+          {
+            "itemId": "B",
+            "name": "B",
+            "buildQty": 6,
+            "draws": [
+              {
+                "itemId": "steel",
+                "quantity": 18
+              }
+            ]
+          },
+          {
+            "itemId": "assembly",
+            "name": "assembly",
+            "buildQty": 6,
+            "draws": [
+              {
+                "itemId": "A",
+                "quantity": 6
+              },
+              {
+                "itemId": "B",
+                "quantity": 6
+              }
+            ]
+          }
+        ],
+        "shortfalls": []
+      }
+    },
+    {
+      "test": "fractional recipe roll-up agrees with feasible plan",
+      "status": "fail",
+      "error": "{\"count\":1,\"limiting\":[],\"subKitCount\":0}\n\n1 !== 4\n"
+    },
+    {
+      "test": "100 shared-material cases match independent arithmetic",
+      "status": "pass",
+      "actual": {
+        "cases": 100
+      }
+    },
+    {
+      "test": "consume earliest-expiring batch first",
+      "status": "pass",
+      "actual": {
+        "consumed": [
+          {
+            "batchKey": "early",
+            "amount": 3
+          },
+          {
+            "batchKey": "late",
+            "amount": 3
+          }
+        ],
+        "shortfall": 0
+      }
+    },
+    {
+      "test": "batch shortage is explicit",
+      "status": "pass",
+      "actual": {
+        "consumed": [
+          {
+            "batchKey": "early",
+            "amount": 3
+          },
+          {
+            "batchKey": "late",
+            "amount": 8
+          },
+          {
+            "batchKey": "none",
+            "amount": 5
+          }
+        ],
+        "shortfall": 4
+      }
+    },
+    {
+      "test": "selected lot cannot silently spill into another lot",
+      "status": "pass",
+      "actual": {
+        "consumed": [
+          {
+            "batchKey": "early",
+            "amount": 3
+          }
+        ],
+        "shortfall": 2
+      }
+    },
+    {
+      "test": "transfer cannot overdraw source",
+      "status": "pass"
+    },
+    {
+      "test": "circular assembly guard and deterministic repair",
+      "status": "pass"
+    }
+  ]
+}
