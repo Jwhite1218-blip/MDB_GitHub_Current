@@ -5971,3 +5971,12 @@ button:disabled {
   .service-cost-variance { grid-template-columns: 1fr; }
 }
 
+.research-intake { padding: 16px; border: 1px solid #b8cad8; border-radius: 10px; background: #f5f9fc; }
+.research-intake summary { cursor: pointer; font-weight: 700; }
+.research-intake summary span { margin-left: 8px; color: #536675; font-size: 12px; font-weight: 400; }
+.research-intake p { color: #425666; font-size: 13px; line-height: 1.5; }
+.research-intake label { display: grid; gap: 6px; margin-top: 14px; }
+.research-intake label > span { font-size: 13px; font-weight: 600; }
+.research-intake textarea { min-height: 74px; width: 100%; }
+.research-intake select { width: 100%; }
+.research-intake-footnote { margin-bottom: 0; }

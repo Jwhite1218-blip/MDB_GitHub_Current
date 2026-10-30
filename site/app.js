@@ -402,6 +402,42 @@ const calibrationAdminPin = "";
 const calibrationReps = [publicDemoIdentity];
 
 const calibrationTrainingScenarios = [
+  ...(isPublicDemo ? [
+    {
+      id: "research-energy-quality", title: "Good Energy, Questionable Sample", subtitle: "Research preview · Energy correction and borehole quality.",
+      researchPreview: true, sourceNote: "Research supplement §5.3 and §6; Whited & Edil (1986), Liao et al. (2007). Proposed training content; technical review pending.",
+      prompt: "A customer has a measured energy ratio of 75% and a raw N of 20. Sand entered the hollow stem before sampling. They ask whether correcting to N60 makes the result reliable.",
+      items: [
+        { type: "check", text: "Keep the raw drive record and the report's tested configuration", correct: true },
+        { type: "check", text: "Record sand entry and the borehole conditions as a separate quality concern", correct: true },
+        { type: "check", text: "Route suitability of the affected test to the project technical lead", correct: true },
+        { type: "check", text: "Tell the customer energy correction removes the effect of sand entry", correct: false, note: "Energy normalization addresses delivered energy; it cannot undo borehole disturbance." },
+        { type: "check", text: "Explain that the energy-only result is 25, with other corrections and suitability requiring their own review", correct: true },
+      ],
+    },
+    {
+      id: "research-signal-quality", title: "Erratic Readings After a Clean Run", subtitle: "Research preview · Measurement evidence before diagnosis.",
+      researchPreview: true, sourceNote: "Research supplement §5.4 and §10; Machado et al. (2017/2018). Study involved a manual trigger-release system; no automatic-hammer operating settings are inferred.",
+      prompt: "Energy readings suddenly become erratic. The previous interval looked consistent, and a sensor mounting concern is reported. The customer wants a replacement hammer quoted immediately.",
+      items: [
+        { type: "check", text: "Preserve affected records and identify the last consistent interval", correct: true },
+        { type: "check", text: "Record sensor, mounting, setup, and operating changes for qualified review", correct: true },
+        { type: "check", text: "Route suspect signals to calibration support before accepting the summary", correct: true },
+        { type: "check", text: "Conclude that the hammer has failed from the energy number alone", correct: false, note: "The measurement system and operating configuration need review before assigning a mechanical cause." },
+      ],
+    },
+    {
+      id: "research-configuration-change", title: "Same Rig, Changed Setup", subtitle: "Research preview · Does the earlier report still apply?",
+      researchPreview: true, sourceNote: "Research supplement §5.5–5.6 and GEO-CAL-001. Proposed review trigger, not a universal recalibration interval.",
+      prompt: "A rig was calibrated six months ago. The hammer has since been repaired and the anvil setup changed. The customer asks whether the previous report is enough for an upcoming project.",
+      items: [
+        { type: "check", text: "Link the earlier report and identify its tested configuration", correct: true },
+        { type: "check", text: "Collect the repair details, current setup, and project's documentation requirement", correct: true },
+        { type: "check", text: "Ask the technical owner to review whether the report remains applicable", correct: true },
+        { type: "check", text: "Confirm validity just because the report is less than a year old", correct: false, note: "Elapsed time alone does not establish continued applicability after repair or configuration change." },
+      ],
+    },
+  ] : []),
   {
     id: "normal-appointment",
     title: "Normal Appointment",
@@ -3872,6 +3908,26 @@ function renderServiceRequestEditor() {
       <label><span>Service location</span><input name="serviceLocation" placeholder="Site, city, or MDB shop"></label>
       <label><span>Customer contact</span><input name="customerContact" placeholder="Name, phone, or email"></label>
       <label class="is-wide"><span>Complaint / observed condition</span><textarea name="complaint" rows="3" placeholder="What happened, what is the machine doing, and what has already been checked?"></textarea></label>
+      ${isPublicDemo ? `<details class="is-wide research-intake"><summary>Add drilling context <span>Optional · preview</span></summary>
+        <p>Use the questions that fit this call. Leave unknown details blank; the office can follow up.</p>
+        <label><span>What kind of issue?</span><select id="drillingContextKind" name="drillingContextKind"><option value="">Choose an issue</option><option value="energy">Hammer energy / calibration data</option><option value="hsa">Sand entry / HSA sampling</option><option value="core">Poor core recovery</option></select></label>
+        <div data-drilling-context="energy" hidden>
+          <label><span>Tested setup and report reference</span><textarea disabled name="contextSetup" data-context-label="Setup and report reference" placeholder="Rig/hammer ID, rods/anvil, report date or reference"></textarea></label>
+          <label><span>What changed since the last consistent reading?</span><textarea disabled name="contextChanges" data-context-label="Changes since consistent readings" placeholder="Repairs, connections, sensors/mounting, operating conditions; checks already performed"></textarea></label>
+          <p>Office handoff: calibration support reviews data quality and report applicability; mechanical symptoms route to service.</p>
+        </div>
+        <div data-drilling-context="hsa" hidden>
+          <label><span>Sampling setup and affected interval</span><textarea disabled name="contextHsaSetup" data-context-label="HSA setup and interval" placeholder="Auger size, pilot/plug, sampler, depth interval and units"></textarea></label>
+          <label><span>What happened before material entered?</span><textarea disabled name="contextHsaConditions" data-context-label="Observed borehole conditions" placeholder="Ground/water observations, fluid level, withdrawal sequence, heave/slough/plugging"></textarea></label>
+          <p>Office handoff: preserve the affected interval for review. Energy correction does not resolve borehole disturbance.</p>
+        </div>
+        <div data-drilling-context="core" hidden>
+          <label><span>Last acceptable run and first poor run</span><textarea disabled name="contextCoreRuns" data-context-label="Core run comparison" placeholder="Depths and units, recovered length, bit/barrel, photos or reference IDs"></textarea></label>
+          <label><span>What changed between the runs?</span><textarea disabled name="contextCoreChanges" data-context-label="Changes between core runs" placeholder="Ground, bit wear, controls, fluid returns, vibration; distinguish observations from suspected causes"></textarea></label>
+          <p>Office handoff: drilling and geological review. Poor recovery can reflect the formation or drilling-induced damage.</p>
+        </div>
+        <p class="research-intake-footnote">Entered details travel with the complaint to the service gatekeeper.</p>
+      </details>` : ""}
       <label class="is-wide"><span>Requested work / office help needed</span><textarea name="requestedWork" rows="3" placeholder="Parts identification, escalation, scheduling, diagnostic help, repair..."></textarea></label>
       ${state.serviceRequestFormError ? `<p class="form-error is-wide">${escapeHTML(state.serviceRequestFormError)}</p>` : ""}
       <div class="button-row is-wide"><button type="button" class="secondary-button" data-service-editor-close>Cancel</button><button type="submit" class="primary-button">Submit to Service Gatekeeper</button></div>
@@ -3891,6 +3947,16 @@ async function createServiceRequestFromForm(form) {
     state.serviceRequestFormError = "Describe the observed condition or the work/help being requested.";
     renderServiceRequestsWorkspace();
     return;
+  }
+  const contextLines = [...form.querySelectorAll("[data-context-label]:not(:disabled)")]
+    .filter((field) => field.value.trim())
+    .map((field) => `${field.dataset.contextLabel}: ${field.value.trim()}`);
+  if (isPublicDemo && contextLines.length) {
+    const topic = form.querySelector("#drillingContextKind option:checked")?.textContent || "Drilling context";
+    payload.complaint = [String(payload.complaint || "").trim(), `Drilling context — ${topic}\n${contextLines.join("\n")}`].filter(Boolean).join("\n\n");
+  }
+  for (const key of Object.keys(payload)) {
+    if (key === "drillingContextKind" || key.startsWith("context")) delete payload[key];
   }
   try {
     if (!isPublicDemo) {
@@ -5286,7 +5352,7 @@ function renderCalibrationTrainingWorkspace() {
   const identity = calibIdentityGateEnabled ? state.identity : null;
   const adminActive = calibIdentityGateEnabled && identity?.isAdmin && state.calibAdminUnlocked;
   elements.overlayBody.innerHTML = `<div class="workbench training-workbench">
-    <div class="training-intro"><span>Practice only</span><h3>Calibration Call Training</h3><p>Run the field scenario without touching a real customer, calibration record, or quote. Scored against Module 010's real pass/retrain rules.</p></div>
+    <div class="training-intro"><span>Practice only</span><h3>Calibration Call Training</h3><p>Run the field scenario without touching a real customer, calibration record, or quote. Existing cases follow Module 010. Research previews are draft exercises for review and do not establish technician approval.</p></div>
     ${identity ? `<div class="calib-identity-bar">
       <span>Signed in as <strong>${escapeHTML(identity.name)} (${escapeHTML(identity.initials)})</strong></span>
       <div class="calib-identity-actions">
@@ -5356,6 +5422,7 @@ function renderTrainingScenario(id) {
     return;
   }
   stage.innerHTML = `<span class="status-label">Active practice</span><h3>${escapeHTML(scenario.prompt)}</h3>
+    ${scenario.researchPreview ? `<div class="calib-approved-language"><strong>Research preview · technical review pending</strong><p>${escapeHTML(scenario.sourceNote)}</p></div>` : ""}
     ${scenario.approvedLanguage ? `<div class="calib-approved-language"><strong>Approved field explanation</strong><p>“${escapeHTML(scenario.approvedLanguage)}”</p></div>` : ""}
     <p class="calib-instructions">Check every action the trainee should take, fill in any blanks, and put any workflow steps in order.${calibIdentityGateEnabled ? " This locks after one submission — an admin has to reopen it for a retest." : ""}</p>
     <ol class="calib-checklist">${scenario.items.map((item, index) => renderCalibItem(item, index)).join("")}</ol>
@@ -5374,6 +5441,7 @@ function renderCalibItem(item, index) {
 }
 
 function renderCalibResultPanel(record, statusNote) {
+  const researchPreview = calibrationTrainingScenarios.find((scenario) => scenario.id === record.scenarioId)?.researchPreview;
   const emailLine = isPublicDemo
     ? "Portfolio sandbox: this practice result stays only in this browser."
     : (statusNote || (record.emailed
@@ -5381,7 +5449,7 @@ function renderCalibResultPanel(record, statusNote) {
       : "Not emailed yet — email sending isn't configured. Result is saved and visible in the Admin Console."));
   return `<div class="calib-result ${record.outcome === "PASS" ? "calib-result--pass" : "calib-result--retrain"}">
     <span class="status-label ${record.outcome === "PASS" ? "status-label--good" : "status-label--warn"}">${record.outcome === "PASS" ? "Pass" : "Retrain / retest required"}</span>
-    ${record.missed.length ? `<ul>${record.missed.map((note) => `<li>${escapeHTML(note)}</li>`).join("")}</ul>` : `<p>Matches Module 010's pass standard for this scenario.</p>`}
+    ${record.missed.length ? `<ul>${record.missed.map((note) => `<li>${escapeHTML(note)}</li>`).join("")}</ul>` : `<p>${researchPreview ? "Matches the proposed research exercise. This is practice feedback, not technician approval." : "Matches Module 010's pass standard for this scenario."}</p>`}
     <p class="calib-email-status">${emailLine}</p>
     ${calibIdentityGateEnabled ? "<p>This section is now locked. Ask an admin to reopen it for another attempt.</p>" : ""}
   </div>`;
@@ -5432,7 +5500,10 @@ function gradeCalibrationScenario() {
       if (!correct) missedNotes.push(item.note || `Steps were not in the correct order: “${item.text}”`);
     } else {
       const checkbox = $(`[data-calib-item="${index}"]`);
-      if (item.correct && !checkbox?.checked) { incomplete.push(item.text); return; }
+      if (item.correct && !checkbox?.checked) {
+        (scenario.researchPreview ? missedNotes : incomplete).push(item.note || item.text);
+        return;
+      }
       if (!item.correct && checkbox?.checked) missedNotes.push(item.note || item.text);
     }
   });
@@ -5648,6 +5719,14 @@ function handleOverlayInput(event) {
 
 elements.overlayBody.addEventListener("input", handleOverlayInput);
 elements.overlayBody.addEventListener("change", async (event) => {
+  if (event.target.id === "drillingContextKind") {
+    for (const group of elements.overlayBody.querySelectorAll("[data-drilling-context]")) {
+      const active = group.dataset.drillingContext === event.target.value;
+      group.hidden = !active;
+      group.querySelectorAll("textarea").forEach((field) => { field.disabled = !active; });
+    }
+    return;
+  }
   handleOverlayInput(event);
   const target = event.target;
   if (target.id === "itemClassFilter") { state.itemView.itemClass = target.value; state.itemView.selectedPart = ""; renderItemResults(); }
